@@ -1,15 +1,22 @@
 name: ynobuild
 
 # Services
-#   api  — long-running, owns the SQLite DB on the `dbdata` volume
-#   web  — long-running Streamlit UI, talks to api over HTTP
-#   ingest / fetch / splits — one-shot batch jobs (profile: jobs).
-#     Run with:  docker compose run --rm <job> [args]
-#     They mount the same db volume; run them while api is idle (single writer).
+#   api  — long-running; owns the SQLite DB on the `dbdata` volume. Its image
+#          (ynobuild-app) also contains the `ynbtriage` CLI, so the batch jobs
+#          below REUSE it instead of building their own.
+#   web  — long-running Streamlit UI, talks to api over HTTP.
+#   ingest / fetch / splits — one-shot batch jobs (profile: jobs). They have no
+#          build of their own; they run the api image. Because `docker compose
+#          build` always rebuilds api (it is not profiled), the jobs are always
+#          current — no separate, skippable job image to go stale.
+#     Run:   docker compose run --rm <job> [args]
+#     Build the images first (docker compose build, or make demo / make up).
+#     Jobs mount the same db volume; run them while api is idle (single writer).
 
 services:
 
   api:
+    image: ynobuild-app
     build:
       context: .
       target: api
@@ -44,9 +51,12 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # ---- batch jobs (docker compose run --rm <name>) --------------------------
+  # ---- batch jobs: reuse the api image (ynobuild-app), overriding its entrypoint
+  #      to the ynbtriage CLI. No `build:` here, so they can never be the thing a
+  #      plain `docker compose build` skips. Run with: docker compose run --rm <job>
   ingest:
-    build: { context: ., target: core }
+    image: ynobuild-app
+    entrypoint: ["ynbtriage"]
     profiles: ["jobs"]
     environment:
       YNB_DB_PATH: /data/ynobuild.db
@@ -59,7 +69,8 @@ services:
     command: ["load-csv", "/data-in/builds.csv"]
 
   fetch:
-    build: { context: ., target: core }
+    image: ynobuild-app
+    entrypoint: ["ynbtriage"]
     profiles: ["jobs"]
     environment:
       YNB_DB_PATH: /data/ynobuild.db
@@ -70,7 +81,8 @@ services:
     command: ["fetch-dockerfiles"]
 
   splits:
-    build: { context: ., target: core }
+    image: ynobuild-app
+    entrypoint: ["ynbtriage"]
     profiles: ["jobs"]
     environment:
       YNB_DB_PATH: /data/ynobuild.db
