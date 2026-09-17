@@ -1,0 +1,7 @@
+id,tool,repo_url,dockerfile,context,status,log,label,dockerfile_content
+inl-001,mytool,https://github.com/example/mytool,Dockerfile,.,failed,error: 401 Unauthorized while pulling base image,auth_required,"FROM private.registry.io/base:1.2
+RUN apt-get update && apt-get install -y build-essential
+COPY . /app
+RUN make -C /app"
+inl-002,othertool,,Dockerfile,.,failed,fatal error: zlib.h: No such file or directory,build_script_error,"FROM ubuntu:22.04
+RUN gcc -o tool tool.c -lz"

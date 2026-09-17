@@ -1,0 +1,8 @@
+k8s_job_name,tool,tool_idx,repo_url,dockerfile,context,status,created_at,log_lines,log
+build-0001,polyphonia,0,https://github.com/broadinstitute/polyphonia,Dockerfile,.,failed,2026-05-25T17:32:25Z,42,"E: The repository 'http://deb.debian.org/debian buster Release' does not have a Release file.
+E: Failed to fetch http://deb.debian.org/debian/dists/buster/Release  404  Not Found"
+build-0002,fur,0,https://github.com/EvolBioInf/fur,docker/Dockerfile,docker/.,failed,2026-05-25T21:03:37Z,18,"Reading package lists...
+E: Version '1.9-4' for 'libhts-dev' was not found"
+build-0003,deepea,0,https://github.com/cma2015/deepEA,Dockerfile,.,timeout,2026-05-25T21:08:54Z,120,"engine.c:88:10: fatal error: htslib/sam.h: No such file or directory
+compilation terminated.
+make: *** [engine.o] Error 1"

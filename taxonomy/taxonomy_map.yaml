@@ -1,0 +1,83 @@
+# taxonomy_map.yaml
+# Collapsed failure taxonomy (3-class), v0.2. Axis: failure_locus.
+# This file is the single source of truth for the label space. The DB is seeded
+# from it, and the coarse class is derived from the leaf. Changing the collapse
+# is a version bump here + a re-seed, never a data migration.
+#
+# All 12 leaves from build-failure-review are placed. None are excluded.
+# Five carry leaf-level caveats (see `caveat` / `rule_prefilled`).
+
+version: "0.2"
+axis: failure_locus
+source_taxonomy: build-failure-review
+
+classes:
+
+  environment_decay:
+    display_name: Environment decay
+    sort_order: 1
+    description: >
+      The recipe is unchanged, but the package ecosystem it depends on has
+      moved. Resolution, fetch, or installation of an upstream artifact fails
+      because that artifact, its index, or the tooling that reaches it is out
+      of date. Dominant class (~60-70% of the corpus).
+    leaves:
+      dependency_rot:
+        display_name: Dependency rot
+        description: Package manager too old to talk to current upstream repos.
+      vanished_dependency:
+        display_name: Vanished dependency
+        description: A specific pinned version, URL, or release artifact is gone.
+      package_conflict:
+        display_name: Package conflict
+        description: Packages from different eras exist but cannot coexist.
+      parent_image_unavailable:
+        display_name: Parent image unavailable
+        description: The FROM image's distro repos have been decommissioned. Most distinctive signature in the taxonomy.
+
+  recipe_error:
+    display_name: Recipe error
+    sort_order: 2
+    description: >
+      The build instructions are wrong, unparseable, or inconsistent with the
+      state of the repository. The failure is in the recipe itself, before any
+      upstream or runtime resource comes into play. The small class.
+    leaves:
+      dockerfile_parse_error:
+        display_name: Dockerfile parse error
+        description: Docker cannot parse the Dockerfile; build dies before step 1.
+        rule_prefilled: true
+      context_mismatch:
+        display_name: Context mismatch
+        description: COPY/ADD targets a file outside the build context.
+        caveat: leaf_split_not_log_decidable
+      repo_structure_changed:
+        display_name: Repo structure changed
+        description: COPY/ADD targets a file that no longer exists in the repo.
+        caveat: leaf_split_not_log_decidable
+
+  build_execution:
+    display_name: Build execution
+    sort_order: 3
+    description: >
+      A command actually ran and the build died at execution time, for a reason
+      that is neither upstream drift nor a malformed recipe. Heterogeneous by
+      design: members share a locus, not a fix archetype.
+    leaves:
+      build_script_error:
+        display_name: Build script error
+        description: Compilation errors, missing headers, bad flags, stricter compiler, logic error in a RUN line.
+      resource_exhaustion:
+        display_name: Resource exhaustion
+        description: Out of memory, out of disk, or exceeded a time limit.
+      platform_incompatibility:
+        display_name: Platform incompatibility
+        description: Architecture, GPU, or OS feature not available in the build environment.
+      network_download_failure:
+        display_name: Network download failure
+        description: A download hangs, times out, or is rate-limited; the resource may still exist.
+        caveat: unstable_ground_truth
+      auth_required:
+        display_name: Auth required
+        description: Credential/login walls, license-gated downloads, non-interactive TOS assent, private registries. Gate signatures must be matched before the decay check.
+        caveat: distinctive_signal_dissolved_into_residual

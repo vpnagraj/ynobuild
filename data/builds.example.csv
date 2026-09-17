@@ -1,0 +1,20 @@
+id,tool,tool_idx,repo_url,dockerfile,context,created_at,status,log_lines,log,label
+ex-001,polyphonia,1,https://github.com/broadinstitute/polyphonia,Dockerfile,.,2026-05-25T17:32:25Z,failed,44,"Step 3/14 : RUN apt-get update && apt-get install -y python3
+ ---> Running in a1b2c3
+E: The repository 'http://deb.debian.org/debian buster Release' does not have a Release file.
+E: Failed to fetch http://deb.debian.org/debian/dists/buster/Release  404  Not Found
+The command '/bin/sh -c apt-get update' returned a non-zero code: 100",parent_image_unavailable
+ex-002,fur,1,https://github.com/EvolBioInf/fur,docker/Dockerfile,docker/.,2026-05-25T21:03:37Z,failed,31,"Reading package lists...
+Building dependency tree...
+E: Version '1.9-4' for 'libhts-dev' was not found
+The command '/bin/sh -c apt-get install -y libhts-dev=1.9-4' returned a non-zero code: 100",dependency_rot
+ex-003,chrokit,1,https://github.com/ocroci/ChroKit,dockerfile_ChroKit_new,.,2026-05-26T02:11:09Z,failed,88,"Step 9/20 : RUN R -e 'install.packages(""shiny"")'
+ ---> Running in ff00aa
+Error: package or namespace load failed for 'BiocManager'
+Execution halted
+The command '/bin/sh -c R -e ...' returned a non-zero code: 1",build_script_error
+ex-004,sigflow,1,https://github.com/ShixiangWang/sigflow,Dockerfile,.,2026-05-26T04:55:12Z,failed,52,"Step 6/12 : RUN wget https://example.org/data/refs.tar.gz
+ ---> Running in 9c9c9c
+Connecting to example.org... failed: Connection timed out.
+wget: unable to resolve host address 'example.org'
+The command '/bin/sh -c wget ...' returned a non-zero code: 4",network_download_failure
