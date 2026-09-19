@@ -1,86 +1,77 @@
 # ynobuild
 
-Tooling to browse and annotate container build failures under a collapsed 3-class taxonomy. Backed by SQLite, the tool helps build a labelled corpus and "gold standard" data for downstream modeling.
+`ynobuild` provides tooling to browse and annotate container build failures using a set taxonomy. Backed by a database, the web app visualizes container build recipes (i.e., Dockerfiles) and build log file contents. Each build can be annotated with failure categories, which will serve as labeled data for downstream modeling. The goal is to eventually use logs as text data inputs to fine-tune a deep learning language model.
 
-The label space is defined once in [`taxonomy/taxonomy_map.yaml`](taxonomy/taxonomy_map.yaml) and seeded into the DB. Leaf labels are ground truth; the coarse class is derived
-from the leaf. Three classes, twelve leaves, none excluded (five carry leaf-level caveats).
- 
-> **Note on the label space.** This repo implements the taxonomy v0.2 scheme
-> (`environment_decay`, `recipe_error`, `build_execution`). An older simplified
-> draft lists a different set (`access_gated`, with three leaves excluded). They
-> disagree; v0.2 is treated as authoritative here. To switch, edit only
-> `taxonomy_map.yaml` and re-run `initdb` — nothing else hard-codes the classes.
- 
+The failure label space is specified via [`taxonomy/taxonomy_map.yaml`](taxonomy/taxonomy_map.yaml) and seeded into the DB. Leaf labels are ground truth; the coarse class is derived from the leaf. There are three classes and twelve leaves overall.
+
+## Overview
+
+- **What it is**: A web app for reviewing failed container builds and labeling why each one failed. You browse the failures, read their logs and Dockerfiles, and assign each a failure category. Labeled log text data can serve downstream objectives to develop a deep learning classifier for build failures.
+
+- **The data**: Records of failed container (Docker/Apptainer) builds. Each record has a build log and its spec file contents (e.g., Dockerfile) contents. The logs are the main thing being read and labeled.
+
+- **Running it**: Requires Docker and Docker Compose. Run `docker compose build`, load your data with `docker compose run --rm ingest`, then `docker compose up -d api web` and open http://localhost:8501 (or `make demo` to start with a small synthetic dataset).
+
+- **Main libraries**: Streamlit for the interface, FastAPI for the backend, and SQLite for storage, with pandas, Typer, and httpx for loading data, the command-line tools, and HTTP requests. Everything runs in Docker containers via Docker Compose.
+
+- **Features**: Search and view records of build failure details, including a side-by-side Dockerfile and logs with the first error line highlighted. The ingest utility requires build logs, and can either accept Dockerfile text provided for each build or pull contents from GitHub/GitLab. The splits utility assigns train/validation/test/gold data. and lets you delete builds if needed.
+
+- **Annotation**: Yes. Builds are labeled under a three-class, twelve-leaf taxonomy, and labels can be pre-loaded from the input file as suggestions you confirm.
+
+- **Backend / database**:  Yes. A FastAPI service owns a SQLite database (delivered as Docker volume), and the Streamlit interface talks to it over HTTP instead of touching the database directly.
+
 ---
  
 ## Architecture
- 
-Four containers, one shared SQLite volume.
+
+`ynobuild` is containerized with a web app (Streamlit), API (FastAPI), and database (SQLite) as a volume. There are also jobs that run separately to populate data and generate data splits for downstream modeling:
  
 ```
                  ┌──────────────┐        HTTP        ┌──────────────┐
    browser  ───▶ │  web         │  ───────────────▶  │  api         │
    :8501         │  Streamlit   │                    │  FastAPI     │
-                 │ (thin client)│                    │  owns the DB │
                  └──────────────┘                    └──────┬───────┘
-                                                            │ sqlite (WAL)
+                                                            │ sqlite
                               ┌─────────────────────────────┴───────────┐
                               │            dbdata volume                 │
                               │            /data/ynobuild.db             │
                               └─────────────────────────────────────────┘
-        one-shot jobs (share the volume, run offline):
+        jobs (share the volume, run offline):
         ingest ── load CSV      fetch ── pull Dockerfiles      splits ── train/val/test/gold
 ```
- 
-**Why the API owns the DB.** SQLite is embedded, not a server — you can't have
-several containers open the file for writing without contention. So exactly one
-long-running process (`api`) opens it; the UI is a pure HTTP client and never
-touches SQLite. This is also the shape that ports cleanly to Kubernetes: `web`
-and `api` become Deployments, the jobs become `Job`/`CronJob`, and only the DB
-needs a shared volume (or, later, a swap to Postgres to drop the volume
-constraint entirely).
- 
-The batch jobs open the DB directly for bootstrap convenience. WAL mode + a 30s
-busy-timeout make the occasional overlap wait rather than error, but the
-discipline is **single writer**: run jobs while the app is idle. Routing all
-writes through the API is the fully-correct version and a natural cleanup when
-porting to k8s.
+
+**NOTE**: The API owns the DB because SQLite is not run on a server, and therefore can't handle multiple container connections. The API acts as the gateway for all DB transactions, and the Streamlit web app never touches SQLite. However, the batch jobs open the DB directly for convenience. WAL mode + a 30s busy-timeout make the occasional overlap wait rather than error.
  
 ---
  
-## Prerequisites
+## Setup
  
-- Docker + Docker Compose v2
-- (Optional) a GitHub token for Dockerfile fetching — see `.env.example`
-```bash
-cp .env.example .env      # optional; set YNB_ANNOTATOR / GITHUB_TOKEN
-```
+The stack requires Docker and Docker Compose (v2). Docker actions are managed Docker Compose, and the repo includes a `Makefile` for convenience. So `make` is optional,  but plain `docker compose` commands will work as well.
+
+Optionally, set a GitHub token to raise rate limits when fetching Dockerfiles:
+`cp .env.example .env`, then edit `.env` (see relevant variable names provided and commented out in example file).
  
 ---
  
-## Quickstart A — see the UI in 60 seconds (synthetic data)
+## Getting started
+
+### Demo
+
+The `Makefile` includes a `demo` command that wraps the `docker compose build`, `ingest` and `splits` jobs, and `docker compose up` with a demo dataset. The UI and API are launched to run at `localhost`.
  
 ```bash
-make demo          # builds images, seeds ~12 labelled demo builds, assigns splits, starts up
-# UI:  http://localhost:8501
-# API: http://localhost:8000/docs
+## build images, ingest and split demo data, and launch
+## UI:  http://localhost:8501
+## API: http://localhost:8000/docs
+make demo
 ```
- 
-`make demo` is `docker compose build` → `run --rm ingest demo-seed` →
-`run --rm splits` → `up`.
- 
 ---
  
-## Quickstart B — your real corpus
+### Basic usage
  
-### 1. Prepare `./data/builds.csv`
+#### 1. Prepare `./data/builds.csv`
  
-One row per build, with the repo URL and the **Dockerfile path within the repo**
-already known — that path is used to fetch the exact Dockerfile later, no
-guessing. A truncated **log** and a **tool name** are the only required fields;
-everything else is optional. Header names are resolved against common aliases
-(first match wins); edit `DEFAULT_MAP` in `src/ynbtriage/ingest.py` to add your
-own:
+To ingest build failure data, prepare a `builds.csv` file with one row per tool build. Each tool must have a name and log. Other elements such as a unique ID, Dockerfile contents, tool repo URL and path to Dockerfile, and build metadata can be provided. The table below presents all fields in the default schema. Header names are resolved against common aliases (first match wins). Edit `DEFAULT_MAP` in `src/ynbtriage/ingest.py` to modify:
  
 | Field             | Accepted headers (first match wins)                                    |
 |-------------------|------------------------------------------------------------------------|
@@ -99,198 +90,109 @@ own:
 | `source_batch`    | batch, source_batch, run, socr8s_run, build_type                       |
 | `label_leaf`      | label, leaf_id, leaf, predefined_label, predicted_label, gold_label     |
  
-This matches a socr8s build-results export joined to a logs file: the export
-supplies `repo_url`, `dockerfile`, `context`, `tool`, `created_at`, and
-`k8s_job_name`; the logs file supplies `log` and `log_lines`. Join the two on
-`(tool, tool_idx)` — that pair is unique in the build-results export and every
-log row matches one. Ready-to-run examples are in
-[`data/builds.example.csv`](data/builds.example.csv) (real repos, fetchable
-Dockerfiles, predefined labels) and
-[`data/builds.with-dockerfile.example.csv`](data/builds.with-dockerfile.example.csv)
-(Dockerfile bodies supplied inline).
- 
-**Dockerfiles: fetch or inline.** Normally you give the repo URL and the
-Dockerfile path, and `fetch` pulls that exact file. Alternatively, if you already
-have the Dockerfile text, put it in a `dockerfile_content` column: it's stored
-directly, marked `provided`, and `fetch` skips that build. You can mix both in one
-CSV — rows with inline content are left alone, rows without it are fetched.
- 
-**Logs: escaping, truncation, empties.** Captured logs often arrive with newlines
-escaped as literal `\n` and may carry an upstream banner like
-`[... truncated 27026/28026 lines, showing last 1000 ...]`. Ingest un-escapes the
-newlines (so the text renders and searches correctly), recovers the true
-pre-truncation line count from that banner or the `log_lines` column, and marks
-the build truncated. A final safety cap (`YNB_LOG_MAX_BYTES`, default 256 KB)
-trims pathological giants to their failing tail. Rows whose log is a `[no logs]`
-sentinel are ingested but carry no signal to annotate from.
- 
-**Identifiers.** If an id column is present and its values are unique across the
-file, it's used as-is. Otherwise a stable id is synthesized from
-`repo_url + dockerfile_path + built_at + tool`, so re-ingesting the same CSV
-updates rows in place instead of duplicating them.
- 
-**Predefined labels (optional).** If a row carries a leaf-level label (a `label`
-column with a value like `auth_required`), ingest records it as a **`prefilled`**
-annotation — a suggestion, not confirmed ground truth. Prefilled builds show up
-in the Annotate queue with the suggested class/leaf pre-selected (one click to
-Confirm) and can be filtered in Browse via *Annotated → prefilled*. They are
-**excluded from splits and the gold set until confirmed**, and never counted as
-`annotated` in stats. Unknown leaf values are reported and ignored (never fatal);
-an existing human or confirmed annotation is never overwritten; re-importing the
-same label is a no-op. `load-csv` prints a `labeled N` count of prefills written.
- 
-### 2. Build and populate the DB
+#### 2. Build and populate the DB
  
 ```bash
+## build images
 docker compose build
  
-# ingest the CSV (creates schema + seeds taxonomy on first run)
-docker compose run --rm ingest                    # runs: load-csv /data-in/builds.csv
+## ingest the builds.csv (creates schema and seeds taxonomy on first run)
+## NOTE: this uses the app CLI to run load-csv on /data-in/builds.csv
+docker compose run --rm ingest
  
-# fetch the exact Dockerfile for each build (uses the known path from the CSV)
-docker compose run --rm fetch                      # needs network; GITHUB_TOKEN raises limits
+## fetch the exact Dockerfile for each build (uses the known path from the CSV)
+## setting the GITHUB_TOKEN can help cut down rate limits to GitHub API
+docker compose run --rm fetch
  
-# assign train/val/test/gold over the labelled builds
+## assign train/val/test/gold over the labeled builds
 docker compose run --rm splits
 ```
  
-Check what landed:
+To see what was populated:
  
 ```bash
 docker compose run --rm ingest stats
 ```
  
-### 3. Start the app
- 
+#### 4. Start the app
+
+To launch the app (with UI running at `http://localhost:8501`):
+
 ```bash
 docker compose up -d api web
-# UI: http://localhost:8501
 ```
+
+#### 5. Use the viewer
+
+With the web app running, connect to a browser to use the viewer. The viewer features two tabs:
+
+- **Browse.** Filter by failure class (and/or leaf), annotation state, split, or free-text search over tool name and log. Open a build to see the Dockerfile and the log tail side by side, with the first failing region presented above.
+- **Annotate.** Look through the queue to add new annotations or confirm existing ones. You can view annotation labels at the class or leaf levels of the failure taxonomy. Use the Confirm/Defer/Skip buttons. Note that builds imported with a predefined label arrive here as **prefilled** suggestions with the class/leaf pre-selected.
  
 ---
  
-## The two screens
- 
-**Browse.** Filter by class, leaf, annotation state, split, or free-text search
-over tool name and log. Open a build to see the Dockerfile and the log tail side
-by side, with the first failing region surfaced automatically.
- 
-**Annotate.** Walk the unannotated queue. Pick a coarse class; the leaves for
-that class are revealed; pick one. Confirm, **Defer** (low confidence — kept out
-of training later), or **Skip**. Builds imported with a predefined label arrive
-here as **prefilled** suggestions with the class/leaf pre-selected — review and
-Confirm (or change) rather than starting from scratch. Every action appends to an
-immutable annotation history; the latest row per build wins. This is where the
-hand-curated **gold set** comes from, and the gold split never moves once
-assigned.
- 
----
- 
-## Populating the DB — reference
+
+## Managing the DB
+
+### Populating records
+
+The table below provides a reference for basic commands to manage the corpus of text in the DB:
  
 | Command                                              | Effect                                             |
 |------------------------------------------------------|----------------------------------------------------|
-| `docker compose run --rm ingest`                     | Load `data/builds.csv` → `builds`                  |
-| `docker compose run --rm ingest demo-seed`           | Insert synthetic labelled builds                   |
+| `docker compose run --rm ingest`                     | Load `data/builds.csv` into `builds`                  |
+| `docker compose run --rm ingest demo-seed`           | Insert synthetic labeled into builds                   |
 | `docker compose run --rm fetch`                      | Fetch each build's Dockerfile by its known path    |
-| `docker compose run --rm splits`                     | Assign train/val/test/gold (stratified, seeded)    |
+| `docker compose run --rm splits`                     | Assign train/val/test/gold    |
 | `docker compose run --rm ingest stats`               | Print corpus statistics                            |
-| `docker compose run --rm ingest delete-build <id>`   | Delete one build + its annotation history          |
-| `docker compose run --rm ingest prune-no-logs`       | Delete all `[no logs]` sentinel builds             |
+| `docker compose run --rm ingest delete-build <id>`   | Delete one build and its annotation history          |
+| `docker compose run --rm ingest prune-no-logs`       | Bulk-delete builds whose log is the "[no logs]" placeholder             |
+  
+### Deleting records
  
-The `initdb` step is implicit: every command and the API itself run
-`ensure_schema` + `seed_taxonomy` on start, so ordering never breaks a fresh
-volume.
- 
----
- 
-## Deleting builds
- 
-Deletion is permanent and drops the build's entire annotation history. It's the
-right tool for "this build shouldn't be in the corpus at all" — to reverse a
-*label*, don't delete; just re-annotate (latest-per-build wins). Re-ingesting the
-source CSV re-creates a deleted build, since the upsert keys on `external_id`.
- 
-Foreign keys are enforced with no cascade, so the tooling removes the
-`annotation` and `dataset_split` rows before the build, in one transaction. Two
-ways in:
- 
-**UI.** Open a build in Browse → *⚠ Danger zone* → tick the confirm box → Delete.
-Bulk-remove `[no logs]` builds from the sidebar *Maintenance* → Scan → confirm.
- 
-**CLI** (jobs allocate a TTY, so the confirm prompt works; pass `--yes` for
-non-interactive use):
+Deletion is permanent. The delete feature should not be used to "reverse a label". In that case, re-annotate to overwrite an existing label. If you do delete, you can repopulate with the `builds.csv`, but the annotation history will be gone.
+
+You can delete in the UI (Open a build in Browse → *⚠ Danger zone* → tick the confirm box → Delete) or from the CLI:
  
 ```bash
-docker compose run --rm ingest delete-build 42            # by build_id
-docker compose run --rm ingest delete-build --external-id build-6a14…   # by external_id
-docker compose run --rm ingest prune-no-logs --dry-run    # count sentinels, delete nothing
-docker compose run --rm ingest prune-no-logs --yes        # delete them
+## by build id
+docker compose run --rm ingest delete-build 42 
+## by external id
+docker compose run --rm ingest delete-build --external-id build-6a14
+## any records with "no logs" provided
+docker compose run --rm ingest prune-no-logs --dry-run
+docker compose run --rm ingest prune-no-logs --yes
 ```
- 
-Run deletions while the app is idle — the API is the DB's single writer. Deleting
-via `docker compose run` opens the DB from a second process; WAL + the busy
-timeout usually absorb it, but `docker compose stop api web` first is the clean
-path. `make clean` (`docker compose down -v`) wipes the whole DB volume instead.
- 
----
- 
-## Schema (essentials)
- 
-- **`builds`**: One row per build (tool, repo, `dockerfile_path`,
-  `build_context`, log tail, and the fetched Dockerfile body filled by `fetch`).
-- **`taxonomy_class` / `taxonomy_leaf`**: Seeded from the YAML; the leaf carries
-  `rule_prefilled` and `caveat` flags.
-- **`annotation`**: Append-only. `current_annotation` view = latest per build.
-- **`dataset_split`**: The split of train/val/test/gold; gold is sticky.
-Inspect it:
- 
+**NOTE**: You should only run delete commands in the CLI while the app is idle. 
+
+To wipe the whole DB volume:
+
 ```bash
-make shell         # opens a python sqlite3 REPL with `con` bound to the DB
+make clean
 ```
- 
 ---
  
-## Ports
- 
-| Service | URL                          |
-|---------|------------------------------|
-| web     | http://localhost:8501        |
-| api     | http://localhost:8000/docs   |
- 
----
- 
-## Path to Kubernetes
- 
-Nothing here blocks the port. `web` and `api` are stateless HTTP services →
-Deployments + Services. `ingest` / `fetch` / `splits` → `Job`s (or `fetch` and a
-periodic rebuild as `CronJob`s). The one snag is the shared `dbdata` volume:
-SQLite on a `ReadWriteMany` PVC works but is the weakest link. When it starts to
-hurt, swap the `db.py` connection for Postgres — the repository layer is the only
-thing that touches SQL, so the blast radius is one module.
+### Inspecting the schema
+
+`Makefile` includes a command to inspect the DB schema via Python SQLite REPL with the connection bound to the DB:
+
+```bash
+make shell
+```
+
+The main components of the schema are **builds** (one row per build), **taxonomy_class**/**taxonomy_leaf** (build failure categories seeded from YAML spec), **annotation** (stores the annotation information as append-only), and **dataset_split** (the split of train/test/val/gold).
  
 ---
- 
+
 ## Troubleshooting
  
-- **`database is locked`** — a job and the API wrote at the same time. Bring the
-  app down (`docker compose stop api web`), run the job, bring it back up. WAL +
-  busy-timeout usually absorb this, but heavy concurrent writes will still trip.
-- **UI says "cannot reach the API"** — `docker compose ps`; wait for `api` to be
-  healthy (it self-migrates on first boot), then reload.
-- **Dockerfile fetch returns `not_found`** — the path in the CSV didn't resolve
-  on the repo's default / `main` / `master` branch (repo moved, renamed, or the
-  path is stale). The fetcher falls back to a few conventional paths; add more to
-  `CANDIDATE_PATHS` in `src/ynbtriage/fetch.py` if needed.
-- **Rebuild after code changes** — `docker compose build <service>` then `up -d`.
+- **Database is locked**: The DB can become locked when a job and the API wrote at the same time. Bring the app down (`docker compose stop api web`), run the job, bring it back up.
+- **UI says "cannot reach the API"**: `docker compose ps` and wait for `api` to be healthy, then reload.
+- **Dockerfile fetch returns `not_found`**: The path in the CSV didn't resolve on the repo's default / `main` / `master` branch. This could be because the repo moved, was renamed, or the path is stale. See paths fetched in `src/ynbtriage/fetch.py` and adjust `CANDIDATE_PATHS` in that module if needed.
+- **Rebuild after code changes**: `docker compose build <service>` then `up -d`.
+
 ---
- 
-## Running without Docker (optional, for quick iteration)
- 
-```bash
-pip install -e ".[api]"
-export YNB_DB_PATH=./ynobuild.db
-ynbtriage demo-seed && ynbtriage splits
-uvicorn ynbtriage.api:app --reload --port 8000 &
-YNB_API_URL=http://localhost:8000 streamlit run web/app.py
-```
+
+## Next steps
+
+- **Moving to Kubernetes**: Currently `ynobuild` is packaged/delivered with Docker Compose. The stack could be ported to Kubernetes (`web` and `api` as Deployment/Services; `ingest`, `fetch`, `splits` as Jobs). The SQLite DB (currently in `dbdata` volume) would need to be reconsidered, but a PV/PVC may work. 
