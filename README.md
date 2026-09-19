@@ -24,7 +24,7 @@ The failure label space is specified via [`taxonomy/taxonomy_map.yaml`](taxonomy
  
 ## Architecture
 
-`ynobuild` is containerized with a web app (Streamlit), API (FastAPI), and database (SQLite) as a volume. There are also jobs that run separately to populate data and generate data splits for downstream modeling:
+`ynobuild` is containerized with a web app (Streamlit), API (FastAPI), and database (SQLite) as a volume. The tool includes a CLI (called `ynbtriage`) for managing the corpus in the DB. These actions operate as jobs that run separately to populate data and generate data splits for downstream modeling:
  
 ```
                  ┌──────────────┐        HTTP        ┌──────────────┐
@@ -36,11 +36,11 @@ The failure label space is specified via [`taxonomy/taxonomy_map.yaml`](taxonomy
                               │            dbdata volume                 │
                               │            /data/ynobuild.db             │
                               └─────────────────────────────────────────┘
-        jobs (share the volume, run offline):
+        jobs (share the volume, run offline via containers with the ynbtriage CLI):
         ingest ── load CSV      fetch ── pull Dockerfiles      splits ── train/val/test/gold
 ```
 
-**NOTE**: The API owns the DB because SQLite is not run on a server, and therefore can't handle multiple container connections. The API acts as the gateway for all DB transactions, and the Streamlit web app never touches SQLite. However, the batch jobs open the DB directly for convenience. WAL mode + a 30s busy-timeout make the occasional overlap wait rather than error.
+**NOTE**: The API owns the DB because SQLite is not run on a server, and therefore can't handle multiple container connections. The API acts as the gateway for all DB transactions, and the Streamlit web app never touches SQLite. However, the batch jobs open the DB directly for convenience. WAL mode combined with a 30 second busy-timeout make the occasional overlap wait rather than error.
  
 ---
  
@@ -69,21 +69,21 @@ make demo
  
 ### Basic usage
  
-#### 1. Prepare `./data/builds.csv`
+#### 1. Prepare `data/builds.csv`
  
 To ingest build failure data, prepare a `builds.csv` file with one row per tool build. Each tool must have a name and log. Other elements such as a unique ID, Dockerfile contents, tool repo URL and path to Dockerfile, and build metadata can be provided. The table below presents all fields in the default schema. Header names are resolved against common aliases (first match wins). Edit `DEFAULT_MAP` in `src/ynbtriage/ingest.py` to modify:
  
 | Field             | Accepted headers (first match wins)                                    |
 |-------------------|------------------------------------------------------------------------|
 | `external_id`     | id, build_id, external_id, uuid, run_id, **k8s_job_name**, job_name     |
-| `tool_name` *req* | tool, tool_name, name, package, recipe                                  |
+| `tool_name`       | tool, tool_name, name, package, recipe                                  |
 | `tool_version`    | version, tool_version, tag, image_tag                                   |
 | `image_ref`       | image, image_ref, image_name, container, result_repo                   |
 | `source_repo_url` | repo, **repo_url**, source_repo_url, url, git_url, homepage, source     |
 | `dockerfile_path` | **dockerfile**, dockerfile_path, df_path, containerfile                 |
 | `dockerfile_content` | dockerfile_content, dockerfile_text, dockerfile_body                 |
 | `build_context`   | **context**, build_context, docker_context                             |
-| `log_tail` *req*  | log, log_tail, build_log, truncated_log, logs, output, log_excerpt      |
+| `log_tail`        | log, log_tail, build_log, truncated_log, logs, output, log_excerpt      |
 | `log_lines_src`   | **log_lines**, log_line_count, n_lines, line_count                      |
 | `build_status`    | status, build_status, outcome, result, result_status                   |
 | `built_at`        | built_at, **created_at**, timestamp, date, build_date, time, started_at |
@@ -127,7 +127,7 @@ docker compose up -d api web
 With the web app running, connect to a browser to use the viewer. The viewer features two tabs:
 
 - **Browse.** Filter by failure class (and/or leaf), annotation state, split, or free-text search over tool name and log. Open a build to see the Dockerfile and the log tail side by side, with the first failing region presented above.
-- **Annotate.** Look through the queue to add new annotations or confirm existing ones. You can view annotation labels at the class or leaf levels of the failure taxonomy. Use the Confirm/Defer/Skip buttons. Note that builds imported with a predefined label arrive here as **prefilled** suggestions with the class/leaf pre-selected.
+- **Annotate.** Look through the queue to add new annotations or confirm existing ones. You can view annotation labels at the class or leaf levels of the failure taxonomy. Use the Confirm/Defer/Skip buttons. Note that builds imported with a predefined label arrive here as prefilled suggestions with the class/leaf pre-selected.
  
 ---
  
