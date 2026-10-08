@@ -1,6 +1,6 @@
 """ynobuild — build-failure triage viewer + annotation UI.
 
-Two screens:
+Three screens:
   * Browse   — filterable table of builds; open one to see Dockerfile + log side
                by side, with the first failing region surfaced.
   * Annotate — walk unannotated builds; pick a coarse class, then reveal and pick
@@ -286,7 +286,7 @@ elif screen == "Annotate":
     resp = api.list_builds(annotated=None if mode == "All" else "no", limit=500)
     queue = resp["items"]
     if not queue:
-        st.success("Nothing left in this queue. 🎉")
+        st.success("Nothing left in the queue. 🍕")
         st.stop()
 
     if "annot_idx" not in st.session_state:
@@ -323,11 +323,43 @@ elif screen == "Annotate":
 elif screen == "Predict":
     import hashlib
 
-    st.header("Predict")
-    st.caption("Classify a failed build from its log with the trained neural network (MLP). "
-               "Nothing entered here is saved.")
-
+    # Check the model service before drawing the header, so the card can sit beside it.
     status = api.model_status()
+    info = api.model_info() if status and status.get("model_loaded") else None
+
+    head, card = st.columns([3, 1], vertical_alignment="top")
+    with head:
+        st.header("Predict")
+        st.caption("Classify a failed build from its log with the trained neural network (MLP) model.")
+
+    # ---- compact model card, top right: the served MLP first, baselines tucked away
+    if info:
+        with card, st.container(border=True):
+            arch = info.get("architecture", {})
+            hidden = "→".join(str(h) for h in arch.get("hidden", []))
+            mlp_test = info.get("scores", {}).get("mlp", {}).get("test")
+            lines = [f"**MLP** `{info['name']}`"]
+            if mlp_test:
+                lines.append(f"test macro-F1 **{mlp_test['macro_f1']:.3f}**")
+            st.markdown("  \n".join(lines))
+            st.caption(f"hidden {hidden} · {arch.get('activation', '?')} · "
+                       f"{info.get('features', '?')}  \n"
+                       f"trained {str(info.get('trained_at', '?'))[:10]}")
+
+            names = {"mlp": "MLP (served)", "tfidf_logreg": "TF-IDF + logistic reg.",
+                     "majority": "Majority class"}
+            scores = {k: v["test"] for k, v in info.get("scores", {}).items() if v.get("test")}
+            if len(scores) > 1:
+                with st.popover("Baselines"):
+                    st.caption("Held-out test scores from training. The baselines are for "
+                               "comparison with the MLP.")
+                    st.table([{"model": names.get(k, k),
+                               "macro-F1": f"{t['macro_f1']:.3f}",
+                               "accuracy": f"{t['accuracy']:.3f}"}
+                              for k, t in sorted(scores.items(),
+                                                 key=lambda kv: list(names).index(kv[0])
+                                                 if kv[0] in names else 99)])
+
     if status is None:
         st.error(f"Cannot reach the model service at {api.MODEL_URL}. "
                  "Is the `model` service up? (`docker compose up -d model`)")
@@ -339,32 +371,6 @@ elif screen == "Predict":
                    "`docker compose restart model`.")
         st.stop()
 
-    info = api.model_info()
-
-    # ---- what model is answering
-    with st.container(border=True):
-        arch = info.get("architecture", {})
-        hidden = " → ".join(str(h) for h in arch.get("hidden", []))
-        st.markdown(
-            f"**Model:** `{info['name']}` · MLP, hidden layer(s) {hidden}, "
-            f"{arch.get('activation', '?')} · input features: {info.get('features', '?')} · "
-            f"trained {info.get('trained_at', '?')}"
-        )
-        order = ["mlp", "tfidf_logreg", "majority"]
-        scores = dict(sorted(info.get("scores", {}).items(),
-                             key=lambda kv: order.index(kv[0]) if kv[0] in order else 99))
-        if scores:
-            cols = st.columns(len(scores))
-            names = {"mlp": "MLP (served)", "tfidf_logreg": "TF-IDF + logistic reg.",
-                     "majority": "Majority class"}
-            for col, (name, s) in zip(cols, scores.items()):
-                t = s.get("test")
-                if t:
-                    col.metric(f"{names.get(name, name)}: test macro-F1", f"{t['macro_f1']:.3f}",
-                               help=f"test accuracy {t['accuracy']:.3f}")
-            st.caption("Held-out test scores from training. The TF-IDF logistic regression "
-                       "is the shallow benchmark the MLP is compared against.")
-
     # ---- input
     source = st.radio("Log input", ["Upload a file", "Paste text"], horizontal=True)
     log_text = ""
@@ -374,7 +380,7 @@ elif screen == "Predict":
             log_text = up.getvalue().decode("utf-8", errors="replace")
     else:
         log_text = st.text_area("Build log text", height=220,
-                                placeholder="Paste the output of a failed docker build…")
+                                placeholder="Paste the output of a failed build …")
 
     # Very large uploads: keep the tail (the service also caps it).
     if len(log_text) > 1_000_000:
@@ -411,9 +417,5 @@ elif screen == "Predict":
         st.markdown("**Probability by class**")
         for cid, p in probs:
             st.progress(p, text=f"{display(cid)}: {p:.1%}")
-        st.caption("The model always chooses one of these classes; it cannot say "
-                   "\"this is not a container build log\". Probabilities are the network's "
-                   "softmax outputs, not calibrated likelihoods.")
 
-        st.markdown("**What the model saw** (lines around the first error, plus the last lines)")
         render_log(res.get("excerpt", ""))
