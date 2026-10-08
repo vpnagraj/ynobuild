@@ -31,13 +31,15 @@ class Predictor:
         return cls(model, joblib.load(d / "featurizer.joblib"), ckpt["labels"], ckpt["target"])
 
     def predict_many(self, logs: list[str]) -> list[dict]:
-        X = torch.tensor(self.featurizer.transform([error_excerpt(l) for l in logs]))
+        excerpts = [error_excerpt(l) for l in logs]
+        X = torch.tensor(self.featurizer.transform(excerpts))
         proba = self.model.predict_proba(X).numpy()
         out = []
-        for row in proba:
+        for row, ex in zip(proba, excerpts):
             probs = {l: float(p) for l, p in zip(self.labels, row)}
             out.append({"label": max(probs, key=probs.get), "target": self.target,
-                        "probabilities": probs})
+                        "probabilities": probs,
+                        "excerpt": ex})  # the text the model actually saw
         return out
 
     def predict(self, log: str) -> dict:

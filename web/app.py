@@ -5,6 +5,8 @@ Two screens:
                by side, with the first failing region surfaced.
   * Annotate — walk unannotated builds; pick a coarse class, then reveal and pick
                a leaf within it (two-level, per the taxonomy). Writes to the DB.
+  * Predict  — upload or paste a build log; the trained MLP (model service)
+               predicts its failure class. Writes nothing.
 """
 import os
 import re
@@ -74,7 +76,7 @@ if not api.health():
     st.stop()
 
 st.sidebar.title("ynobuild")
-screen = st.sidebar.radio("Screen", ["Browse", "Annotate"])
+screen = st.sidebar.radio("Screen", ["Browse", "Annotate", "Predict"])
 annotator = st.sidebar.text_input("Annotator", value=DEFAULT_ANNOTATOR)
 
 stats = api.get_stats()
@@ -316,3 +318,102 @@ elif screen == "Annotate":
             st.rerun()
         except Exception as e:  # noqa: BLE001
             st.error(f"Failed to save: {e}")
+
+# ---------------------------------------------------------------- PREDICT
+elif screen == "Predict":
+    import hashlib
+
+    st.header("Predict")
+    st.caption("Classify a failed build from its log with the trained neural network (MLP). "
+               "Nothing entered here is saved.")
+
+    status = api.model_status()
+    if status is None:
+        st.error(f"Cannot reach the model service at {api.MODEL_URL}. "
+                 "Is the `model` service up? (`docker compose up -d model`)")
+        st.stop()
+    if not status.get("model_loaded"):
+        st.warning("The model service is running but has no model loaded.")
+        st.caption(status.get("error") or "")
+        st.caption("Train one with `ynbtriage train --out models/final ...`, then "
+                   "`docker compose restart model`.")
+        st.stop()
+
+    info = api.model_info()
+
+    # ---- what model is answering
+    with st.container(border=True):
+        arch = info.get("architecture", {})
+        hidden = " → ".join(str(h) for h in arch.get("hidden", []))
+        st.markdown(
+            f"**Model:** `{info['name']}` · MLP, hidden layer(s) {hidden}, "
+            f"{arch.get('activation', '?')} · input features: {info.get('features', '?')} · "
+            f"trained {info.get('trained_at', '?')}"
+        )
+        order = ["mlp", "tfidf_logreg", "majority"]
+        scores = dict(sorted(info.get("scores", {}).items(),
+                             key=lambda kv: order.index(kv[0]) if kv[0] in order else 99))
+        if scores:
+            cols = st.columns(len(scores))
+            names = {"mlp": "MLP (served)", "tfidf_logreg": "TF-IDF + logistic reg.",
+                     "majority": "Majority class"}
+            for col, (name, s) in zip(cols, scores.items()):
+                t = s.get("test")
+                if t:
+                    col.metric(f"{names.get(name, name)}: test macro-F1", f"{t['macro_f1']:.3f}",
+                               help=f"test accuracy {t['accuracy']:.3f}")
+            st.caption("Held-out test scores from training. The TF-IDF logistic regression "
+                       "is the shallow benchmark the MLP is compared against.")
+
+    # ---- input
+    source = st.radio("Log input", ["Upload a file", "Paste text"], horizontal=True)
+    log_text = ""
+    if source == "Upload a file":
+        up = st.file_uploader("Build log", type=["log", "txt"])
+        if up is not None:
+            log_text = up.getvalue().decode("utf-8", errors="replace")
+    else:
+        log_text = st.text_area("Build log text", height=220,
+                                placeholder="Paste the output of a failed docker build…")
+
+    # Very large uploads: keep the tail (the service also caps it).
+    if len(log_text) > 1_000_000:
+        log_text = log_text[-1_000_000:]
+
+    key = hashlib.sha1(log_text.encode("utf-8", errors="replace")).hexdigest()
+    if st.button("Predict", type="primary", disabled=not log_text.strip()):
+        try:
+            st.session_state.prediction = (key, api.predict_log(log_text))
+        except Exception as e:  # noqa: BLE001
+            st.error(f"Prediction failed: {e}")
+
+    # ---- result (only if it belongs to the log currently entered)
+    saved = st.session_state.get("prediction")
+    if saved and saved[0] == key and log_text.strip():
+        res = saved[1]
+        probs = sorted(res["probabilities"].items(), key=lambda kv: -kv[1])
+        top_label, top_p = probs[0]
+        display = lambda cid: LOOKUP.get(cid, {}).get("display", cid)  # noqa: E731
+
+        st.divider()
+        c1, c2 = st.columns([2, 1])
+        c1.metric("Predicted failure class", display(top_label))
+        c2.metric("Model probability", f"{top_p:.1%}")
+
+        if top_p < 0.6:
+            st.warning("Low confidence: the model is unsure between classes. Read the log.")
+        if not res.get("error_line_found"):
+            st.info("No recognizable error line in this log, so the prediction rests on the "
+                    "last lines only and may be unreliable.")
+        if res.get("input_truncated"):
+            st.caption("The log was long; only its tail was used.")
+
+        st.markdown("**Probability by class**")
+        for cid, p in probs:
+            st.progress(p, text=f"{display(cid)}: {p:.1%}")
+        st.caption("The model always chooses one of these classes; it cannot say "
+                   "\"this is not a container build log\". Probabilities are the network's "
+                   "softmax outputs, not calibrated likelihoods.")
+
+        st.markdown("**What the model saw** (lines around the first error, plus the last lines)")
+        render_log(res.get("excerpt", ""))

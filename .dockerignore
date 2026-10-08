@@ -1,0 +1,14 @@
+# Keep the build context small: nothing below is COPY'd into any image.
+# (models/ and data/ reach containers as mounted volumes, not via the build.)
+.git
+.venv
+venv
+env
+.cache
+models
+data
+*.db
+*.db-wal
+*.db-shm
+**/__pycache__
+.pytest_cache
