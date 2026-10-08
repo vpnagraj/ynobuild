@@ -193,6 +193,12 @@ The main components of the schema are **builds** (one row per build), **taxonomy
 
 ---
 
+## Modeling
+
+A neural-network classifier that predicts each build's failure category from its log lives in `src/ynbtriage/model/` and runs through the `ynbtriage` CLI (`train`, `predict`, `synth-db`). See [`docs/modeling.md`](docs/modeling.md).
+
+---
+
 ## Next steps
 
 - **Moving to Kubernetes**: Currently `ynobuild` is packaged/delivered with Docker Compose. The stack could be ported to Kubernetes (`web` and `api` as Deployment/Services; `ingest`, `fetch`, `splits` as Jobs). The SQLite DB (currently in `dbdata` volume) would need to be reconsidered, but a PV/PVC may work. 
