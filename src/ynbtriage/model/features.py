@@ -43,6 +43,9 @@ class TfidfFeaturizer:
         k = max(2, min(self.dim, X.shape[0] - 1, X.shape[1] - 1))
         self.svd = TruncatedSVD(n_components=k, random_state=self.seed)
         Z = self.svd.fit_transform(X)
+        # The projection matrix is (dim x vocabulary) and dominates the saved file.
+        # float32 halves it; features change by ~1e-7 and predictions do not.
+        self.svd.components_ = self.svd.components_.astype(np.float32)
         self.scaler = StandardScaler().fit(Z)
         return self
 

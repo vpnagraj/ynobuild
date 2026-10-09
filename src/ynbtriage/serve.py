@@ -84,20 +84,30 @@ def _model_info(d: Path, predictor) -> dict:
         "architecture": predictor.model.config,
     }
     mpath = d / "metrics.json"
-    if mpath.exists():
-        m = json.loads(mpath.read_text())
+    m = json.loads(mpath.read_text()) if mpath.exists() else {}
+    if m:
         info["features"] = m.get("features")
         info["n"] = m.get("n")
         info["epochs_run"], info["best_epoch"] = m.get("epochs_run"), m.get("best_epoch")
-        info["scores"] = {
-            "mlp": {s: m["mlp"][s] for s in ("val", "test") if s in m.get("mlp", {})},
-            **{name: b for name, b in m.get("baselines", {}).items()},
-        }
-        # keep only the headline numbers; per-class detail stays in metrics.json
-        for model_scores in info["scores"].values():
-            for s, v in model_scores.items():
-                model_scores[s] = {"accuracy": v["accuracy"], "macro_f1": v["macro_f1"]}
+    scores = {}
+    if m.get("mlp"):
+        scores["mlp"] = {s: m["mlp"][s] for s in ("val", "test") if s in m["mlp"]}
+    scores.update(_all_baselines(d, m))
+    # keep only the headline numbers; per-class detail stays in the JSON files
+    info["scores"] = {name: {s: {"accuracy": v["accuracy"], "macro_f1": v["macro_f1"]}
+                             for s, v in sc.items()}
+                      for name, sc in scores.items()}
     return info
+
+
+def _all_baselines(d: Path, metrics: dict) -> dict:
+    """Baselines from metrics.json, plus any added later with `ynbtriage baselines`
+    (baselines.json; it wins where both have the same baseline)."""
+    out = dict(metrics.get("baselines", {}))
+    bpath = d / "baselines.json"
+    if bpath.exists():
+        out.update(json.loads(bpath.read_text()).get("baselines", {}))
+    return out
 
 
 def _load(d: Path):
@@ -275,7 +285,7 @@ def runs():
             "best_epoch": m.get("best_epoch"),
             "val": _headline(mlp.get("val")),
             "test": _headline(mlp.get("test")),
-            "tfidf_logreg": {s: _headline(m.get("baselines", {}).get("tfidf_logreg", {}).get(s))
+            "tfidf_logreg": {s: _headline(_all_baselines(d, m).get("tfidf_logreg", {}).get(s))
                              for s in ("val", "test")},
             "data_fingerprint": m.get("data_fingerprint"),
         })

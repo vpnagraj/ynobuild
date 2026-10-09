@@ -208,6 +208,20 @@ The main components of the schema are **builds** (one row per build), **taxonomy
 
 A neural-network classifier that predicts each build's failure category from its log lives in `src/ynbtriage/model/` and runs through the `ynbtriage` CLI (`train`, `predict`, `synth-db`). See [`docs/modeling.md`](docs/modeling.md).
 
+### Baselines and model size
+
+`ynbtriage train` scores three shallow baselines on the same splits as the MLP: majority class, Naive Bayes on word counts, and TF-IDF + logistic regression. To add baselines to an existing run without retraining it, write a `baselines.json` next to it; the Predict screen's Baselines list picks it up:
+
+```bash
+ynbtriage baselines --db ynobuild.snapshot.db --out models/final
+```
+
+New runs store the featurizer compactly (float32 projection, compressed). To shrink a run saved before that, without changing its predictions (it checks first and refuses to write if any predicted label would change):
+
+```bash
+ynbtriage shrink-model models/final --db ynobuild.snapshot.db
+```
+
 ### Serving the model
 
 The `model` service loads a directory written by `ynbtriage train`, mounted from `./models`. By default it serves `./models/final`, the **default run**:

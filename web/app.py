@@ -353,7 +353,7 @@ elif screen == "Predict":
                        f"trained {str(info.get('trained_at', '?'))[:10]}")
 
             names = {"mlp": "MLP (served)", "tfidf_logreg": "TF-IDF + logistic reg.",
-                     "majority": "Majority class"}
+                     "naive_bayes": "Naive Bayes (word counts)", "majority": "Majority class"}
             scores = {k: v["test"] for k, v in info.get("scores", {}).items() if v.get("test")}
             if len(scores) > 1:
                 with st.popover("Baselines"):

@@ -1,6 +1,8 @@
 """Shallow benchmarks the MLP has to beat. All use the same excerpts and splits.
 
   majority      always predict the most common training label. A floor.
+  naive_bayes   multinomial Naive Bayes on plain word counts (unigrams). The
+                classic simplest text classifier: a weak-but-real shallow model.
   tfidf_logreg  TF-IDF (word + char n-grams, full sparse vocabulary) into a
                 class-balanced logistic regression. The honest shallow benchmark:
                 linear, no hidden layer, strong on lexical log signals.
@@ -11,8 +13,9 @@ from __future__ import annotations
 
 import numpy as np
 from scipy.sparse import hstack
-from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
+from sklearn.naive_bayes import MultinomialNB
 
 
 class Majority:
@@ -22,6 +25,21 @@ class Majority:
 
     def predict(self, X):
         return np.full(len(X), self.label)
+
+
+class CountNB:
+    """Word counts (single words only, no TF-IDF weighting) into multinomial Naive Bayes."""
+
+    def __init__(self, alpha: float = 1.0):
+        self.alpha = alpha
+
+    def fit(self, texts, y):
+        self.vec = CountVectorizer(min_df=2, token_pattern=r"(?u)\b\w[\w.+-]*\b")
+        self.clf = MultinomialNB(alpha=self.alpha).fit(self.vec.fit_transform(texts), y)
+        return self
+
+    def predict(self, texts):
+        return self.clf.predict(self.vec.transform(texts))
 
 
 class TfidfLogReg:
