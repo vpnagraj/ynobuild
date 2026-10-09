@@ -110,6 +110,27 @@ def delete_build(build_id: int):
         return result
 
 
+@app.get("/training-data")
+def training_data(target: str = Query("class", pattern="^(class|leaf)$")):
+    """Confirmed train/val/test rows for model training, as log excerpts.
+
+    Used by the model service so it never has to open the database. Gold rows are
+    never included (load_dataset excludes them), nor are unconfirmed suggestions.
+    """
+    import json
+
+    from .model.data import label_order, load_dataset  # pandas only; no torch here
+
+    with get_conn() as conn:
+        ensure_schema(conn)
+    df = load_dataset(target=target)
+    return {
+        "target": target,
+        "labels": label_order(target=target),
+        "rows": json.loads(df.to_json(orient="records")),
+    }
+
+
 @app.post("/maintenance/prune-no-logs")
 def prune_no_logs(dry_run: bool = False):
     """Delete every build whose log is the '[no logs]' sentinel. dry_run counts only."""

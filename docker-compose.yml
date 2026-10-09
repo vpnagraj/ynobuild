@@ -39,9 +39,12 @@ services:
       start_period: 10s
     restart: unless-stopped
 
-  # model — long-running; serves the trained MLP for the Predict screen. Never
-  #         touches the DB. Loads ./models/<YNB_MODEL_NAME> (default: final) at
-  #         startup; to deploy a different run, set YNB_MODEL_NAME and restart:
+  # model — long-running; serves the trained MLP (Predict screen) and retrains it
+  #         (Train screen). Never touches the DB: training data comes from api's
+  #         /training-data endpoint. Serves ./models/<YNB_MODEL_NAME> (default:
+  #         final) at startup; that default run can't be deleted, and a restart
+  #         always returns to it. Train-screen runs are written to ./models/ui-*,
+  #         so ./models is mounted read-write. To start on a different run:
   #           YNB_MODEL_NAME=run-002 docker compose up -d model
   model:
     image: ynobuild-model
@@ -50,8 +53,9 @@ services:
       target: model
     environment:
       YNB_MODEL_DIR: /models/${YNB_MODEL_NAME:-final}
+      YNB_API_URL: http://api:8000
     volumes:
-      - ./models:/models:ro
+      - ./models:/models
       - hfcache:/cache/hf
     ports:
       - "8001:8001"

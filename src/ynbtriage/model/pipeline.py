@@ -11,6 +11,7 @@ An artifact directory holds everything needed to reproduce and serve a run:
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -29,13 +30,40 @@ TRAIN_COLOR, VAL_COLOR = "#2a78d6", "#eb6834"
 
 def run(out_dir, db_path=None, target="class", features="embed", include_prefilled=False,
         cfg: TrainConfig | None = None, tfidf_dim=256, on_epoch=None) -> dict:
-    cfg = cfg or TrainConfig()
-    out = Path(out_dir)
-    out.mkdir(parents=True, exist_ok=True)
-
-    # ---- data --------------------------------------------------------------
+    """Train from the database (used by the `ynbtriage train` CLI)."""
     df = load_dataset(db_path, target=target, include_prefilled=include_prefilled)
     all_labels = label_order(db_path, target)
+    try:
+        return run_df(out_dir, df, all_labels, target=target, features=features,
+                      include_prefilled=include_prefilled, cfg=cfg, tfidf_dim=tfidf_dim,
+                      on_epoch=on_epoch)
+    except ValueError as e:
+        raise SystemExit(str(e)) from e
+
+
+def data_fingerprint(df: pd.DataFrame) -> dict:
+    """Identify exactly which labelled rows a run was trained and scored on.
+
+    Two runs with the same hash saw the same builds, splits and labels, so their
+    scores are directly comparable. Re-annotating or re-splitting changes it.
+    """
+    keys = sorted(f"{b}:{s}:{l}" for b, s, l in zip(df["build_id"], df["split"], df["label"]))
+    return {"hash": hashlib.sha1("\n".join(keys).encode()).hexdigest()[:12],
+            "n": {s: int((df["split"] == s).sum()) for s in ("train", "val", "test")}}
+
+
+def run_df(out_dir, df: pd.DataFrame, all_labels: list[str], target="class", features="embed",
+           include_prefilled=False, cfg: TrainConfig | None = None, tfidf_dim=256,
+           on_epoch=None, extra: dict | None = None) -> dict:
+    """Train from an already-loaded dataset (columns as returned by data.load_dataset).
+
+    Used directly by the model service, which gets its data from the api service
+    rather than opening the database. `extra` is merged into metrics.json.
+    """
+    cfg = cfg or TrainConfig()
+    out = Path(out_dir)
+
+    # ---- data --------------------------------------------------------------
     train_df = df[df["split"] == "train"]
     labels = [l for l in all_labels if l in set(train_df["label"])]  # drop labels with no training rows
     dropped = sorted(set(df["label"]) - set(labels))
@@ -44,7 +72,7 @@ def run(out_dir, db_path=None, target="class", features="embed", include_prefill
     parts = {s: df[df["split"] == s] for s in ("train", "val", "test")}
     for s, d in parts.items():
         if len(d) == 0:
-            raise SystemExit(f"no '{s}' rows. Annotate more builds and re-run assign-splits.")
+            raise ValueError(f"no '{s}' rows. Annotate more builds and re-run assign-splits.")
     y = {s: d["label"].map(lab2idx).to_numpy() for s, d in parts.items()}
     texts = {s: d["text"].tolist() for s, d in parts.items()}
 
@@ -76,6 +104,7 @@ def run(out_dir, db_path=None, target="class", features="embed", include_prefill
 
     # ---- write artifact ----------------------------------------------------
     import joblib
+    out.mkdir(parents=True, exist_ok=True)
     torch.save({"state_dict": model.state_dict(), "config": model.config, "labels": labels,
                 "target": target, "features": features}, out / "model.pt")
     joblib.dump(feat, out / "featurizer.joblib")
@@ -91,7 +120,9 @@ def run(out_dir, db_path=None, target="class", features="embed", include_prefill
         "n_silver_in_train": int(parts["train"]["silver"].sum()),
         "train_label_counts": parts["train"]["label"].value_counts().to_dict(),
         "leakage": leakage_report(df),
+        "data_fingerprint": data_fingerprint(df),
         **results,
+        **(extra or {}),
     }
     (out / "metrics.json").write_text(json.dumps(summary, indent=2))
     return summary

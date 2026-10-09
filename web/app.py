@@ -1,12 +1,15 @@
 """ynobuild — build-failure triage viewer + annotation UI.
 
-Three screens:
+Four screens:
   * Browse   — filterable table of builds; open one to see Dockerfile + log side
                by side, with the first failing region surfaced.
   * Annotate — walk unannotated builds; pick a coarse class, then reveal and pick
                a leaf within it (two-level, per the taxonomy). Writes to the DB.
   * Predict  — upload or paste a build log; the trained MLP (model service)
                predicts its failure class. Writes nothing.
+  * Train    — retrain the MLP with chosen hyperparameters (model service), watch
+               the loss curves live, compare runs on validation data, and choose
+               which run Predict serves. Never writes to the DB.
 """
 import os
 import re
@@ -76,7 +79,7 @@ if not api.health():
     st.stop()
 
 st.sidebar.title("ynobuild")
-screen = st.sidebar.radio("Screen", ["Browse", "Annotate", "Predict"])
+screen = st.sidebar.radio("Screen", ["Browse", "Annotate", "Predict", "Train"])
 annotator = st.sidebar.text_input("Annotator", value=DEFAULT_ANNOTATOR)
 
 stats = api.get_stats()
@@ -338,9 +341,12 @@ elif screen == "Predict":
             arch = info.get("architecture", {})
             hidden = "→".join(str(h) for h in arch.get("hidden", []))
             mlp_test = info.get("scores", {}).get("mlp", {}).get("test")
+            mlp_val = info.get("scores", {}).get("mlp", {}).get("val")
             lines = [f"**MLP** `{info['name']}`"]
             if mlp_test:
                 lines.append(f"test macro-F1 **{mlp_test['macro_f1']:.3f}**")
+            if mlp_val:
+                lines.append(f"val macro-F1 {mlp_val['macro_f1']:.3f}")
             st.markdown("  \n".join(lines))
             st.caption(f"hidden {hidden} · {arch.get('activation', '?')} · "
                        f"{info.get('features', '?')}  \n"
@@ -419,3 +425,249 @@ elif screen == "Predict":
             st.progress(p, text=f"{display(cid)}: {p:.1%}")
 
         render_log(res.get("excerpt", ""))
+
+# ---------------------------------------------------------------- TRAIN
+elif screen == "Train":
+    import pandas as pd
+
+    RUNNING = ("queued", "loading_data", "training")
+    LOSS_COLORS = ["#2a78d6", "#eb6834"]  # train, val (same as loss_curve.png)
+    FALLBACK = {"hidden": [64], "dropout": 0.2, "lr": 1e-3, "epochs": 200,
+                "features": "tfidf", "activation": "relu"}
+
+    st.header("Train")
+    st.caption("Retrain the neural network (MLP) with different hyperparameters, compare runs "
+               "on validation data, and choose which run the Predict screen uses.")
+
+    if api.model_status() is None:
+        st.error(f"Cannot reach the model service at {api.MODEL_URL}. "
+                 "Is the `model` service up? (`docker compose up -d model`)")
+        st.stop()
+
+    runs = api.list_runs()
+    served = next((r for r in runs if r["served"]), None)
+    default = next((r for r in runs if r["default"]), None)
+    latest = api.train_latest()
+    running = latest if latest and latest["status"] in RUNNING else None
+
+    def fmt_hidden(h):
+        return "→".join(str(x) for x in (h or [])) or "?"
+
+    def f1(scores):
+        return scores["macro_f1"] if scores else None
+
+    # ---- what's served, and the way back to the default run
+    with st.container(border=True):
+        c1, c2 = st.columns([3, 1], vertical_alignment="center")
+        if served:
+            c1.markdown(f"Predict is using **`{served['name']}`** · hidden {fmt_hidden(served['hidden'])} · "
+                        f"val macro-F1 **{f1(served['val']) or float('nan'):.3f}**")
+        else:
+            c1.markdown("Predict has no model loaded.")
+        if default and (not served or served["name"] != default["name"]):
+            if c2.button(f"Switch back to {default['name']}", use_container_width=True):
+                try:
+                    api.deploy_run(default["name"])
+                    st.toast(f"Predict now uses {default['name']}.")
+                except Exception as e:  # noqa: BLE001
+                    st.error(f"Could not switch: {e}")
+                st.rerun()
+        elif default:
+            c2.caption(f"`{default['name']}` is the default model.")
+
+    # ---- hyperparameters (defaults = how the default run was trained)
+    base = dict(FALLBACK)
+    if default:
+        base.update({k: default[k] for k in FALLBACK if default.get(k) is not None})
+    lrs = sorted({1e-4, 3e-4, 1e-3, 3e-3, 1e-2, float(base["lr"])})
+    feats = ["tfidf", "embed", "both"]
+    acts = ["relu", "gelu", "tanh", "sigmoid"]
+
+    st.subheader("New run")
+    with st.form("train_form"):
+        a, b = st.columns(2)
+        hidden_txt = a.text_input(
+            "Hidden layers", value=",".join(str(h) for h in base["hidden"]),
+            help="Units per hidden layer, comma-separated. 64 is one layer of 64 units; "
+                 "128,64 is two layers. Up to 4 layers.")
+        epochs = b.number_input(
+            "Max epochs", min_value=1, max_value=2000, value=int(base["epochs"]), step=10,
+            help="Training stops early once validation loss has not improved for 25 epochs; "
+                 "the weights from the best epoch are kept.")
+        lr = a.select_slider("Learning rate", options=lrs, value=float(base["lr"]),
+                             format_func=lambda v: f"{v:g}")
+        dropout = b.slider("Dropout", 0.0, 0.6, float(base["dropout"]), 0.05)
+        features = st.radio(
+            "Input features", feats, horizontal=True,
+            index=feats.index(base["features"]) if base["features"] in feats else 0,
+            help="tfidf: TF-IDF of the log excerpt, reduced to 256 numbers. "
+                 "embed: frozen sentence-encoder embeddings (the first embed run downloads the encoder). "
+                 "both: the two combined.")
+        with st.expander("Advanced"):
+            activation = st.selectbox("Activation", acts,
+                                      index=acts.index(base["activation"]) if base["activation"] in acts else 0)
+            st.caption("Fixed for all runs: Adam optimizer, batch size 32, early-stopping patience 25, seed 7400.")
+        submitted = st.form_submit_button("Train", type="primary", disabled=running is not None)
+
+    if running:
+        st.caption("A run is in progress; the form unlocks when it finishes.")
+    if submitted:
+        try:
+            hidden = [int(x) for x in hidden_txt.replace(" ", "").split(",") if x]
+        except ValueError:
+            st.error("Hidden layers must be whole numbers separated by commas, e.g. 128,64.")
+        else:
+            try:
+                api.train_start({"hidden": hidden, "epochs": int(epochs), "lr": float(lr),
+                                 "dropout": float(dropout), "features": features,
+                                 "activation": activation})
+                st.rerun()
+            except Exception as e:  # noqa: BLE001
+                st.error(f"Could not start training: {e}")
+
+    # ---- live monitor / latest result
+    def loss_chart(history):
+        h = pd.DataFrame(history)
+        if h.empty:
+            return
+        st.line_chart(h.set_index("epoch")[["train_loss", "val_loss"]], color=LOSS_COLORS,
+                      x_label="epoch", y_label="cross-entropy loss", height=260)
+
+    if running:
+        @st.fragment(run_every=1.0)
+        def monitor(job_id):
+            j = api.train_status(job_id)
+            if j["status"] not in RUNNING:
+                st.rerun()  # finished: redraw the whole page with the result and run list
+            st.subheader(f"Training `{j['run']}`")
+            hist = j["history"]
+            if j["status"] == "loading_data":
+                st.caption("Fetching labelled builds from the api…")
+            else:
+                done = len(hist)
+                st.progress(min(done / max(j["epochs"], 1), 1.0),
+                            text=f"epoch {done} of up to {j['epochs']}")
+                if hist:
+                    last = hist[-1]
+                    best = min(hist, key=lambda r: r["val_loss"])
+                    st.caption(f"val loss {last['val_loss']:.4f} · val accuracy {last['val_acc']:.3f} · "
+                               f"best so far: epoch {best['epoch']} (val loss {best['val_loss']:.4f})")
+                loss_chart(hist)
+            if st.button("Cancel run"):
+                api.train_cancel(job_id)
+
+        monitor(running["id"])
+
+    elif latest:
+        st.subheader(f"Latest run: `{latest['run']}`")
+        if latest["status"] == "failed":
+            st.error(f"Training failed: {latest['error']}")
+        elif latest["status"] == "cancelled":
+            st.info("Cancelled; nothing was saved.")
+        elif latest["status"] == "done" and latest.get("result"):
+            res = latest["result"]
+            this = next((r for r in runs if r["name"] == latest["run"]), None)
+            st.caption(f"{res['epochs_run']} epochs (best epoch {res['best_epoch']}; its weights were kept)")
+            compare = [{"model": f"this run ({latest['run']})",
+                        "val macro-F1": f1(res["mlp"]["val"]), "val accuracy": res["mlp"]["val"]["accuracy"]}]
+            if served and served["name"] != latest["run"]:
+                compare.append({"model": f"currently served ({served['name']})",
+                                "val macro-F1": f1(served["val"]),
+                                "val accuracy": (served["val"] or {}).get("accuracy")})
+            tfl = res["baselines"].get("tfidf_logreg", {}).get("val")
+            if tfl:
+                compare.append({"model": "TF-IDF + logistic reg. (baseline)",
+                                "val macro-F1": tfl["macro_f1"], "val accuracy": tfl["accuracy"]})
+            st.dataframe(pd.DataFrame(compare), hide_index=True, use_container_width=True,
+                         column_config={"val macro-F1": st.column_config.NumberColumn(format="%.3f"),
+                                        "val accuracy": st.column_config.NumberColumn(format="%.3f")})
+            loss_chart(latest["history"])
+            if this and not this["served"]:
+                if st.button(f"Deploy {latest['run']}", type="primary"):
+                    try:
+                        api.deploy_run(latest["run"])
+                        st.toast(f"Predict now uses {latest['run']}.")
+                    except Exception as e:  # noqa: BLE001
+                        st.error(f"Could not deploy: {e}")
+                    st.rerun()
+            elif this is None:
+                st.caption("This run has since been deleted.")
+
+    # ---- all runs
+    st.subheader("Runs")
+    if not runs:
+        st.info("No trained runs yet.")
+        st.stop()
+
+    ref_hash = ((served or default or {}).get("data_fingerprint") or {}).get("hash")
+    table = []
+    for r in runs:
+        h = (r.get("data_fingerprint") or {}).get("hash")
+        tags = [t for t, on in (("served", r["served"]), ("default", r["default"])) if on]
+        table.append({
+            "run": r["name"],
+            "": " · ".join(tags),
+            "hidden": fmt_hidden(r["hidden"]),
+            "activation": r["activation"],
+            "dropout": r["dropout"],
+            "lr": f"{r['lr']:g}" if r["lr"] is not None else None,
+            "features": r["features"],
+            "epochs (best)": f"{r['epochs_run']} ({r['best_epoch']})" if r["epochs_run"] else None,
+            "val macro-F1": f1(r["val"]),
+            "val accuracy": (r["val"] or {}).get("accuracy"),
+            "data": "same" if h and h == ref_hash else ("different" if h else "unknown"),
+        })
+    table.sort(key=lambda x: -(x["val macro-F1"] or 0))
+    st.dataframe(pd.DataFrame(table), hide_index=True, use_container_width=True,
+                 column_config={"val macro-F1": st.column_config.NumberColumn(format="%.3f"),
+                                "val accuracy": st.column_config.NumberColumn(format="%.3f")})
+    ref = served or default
+    tfl_val = f1(((ref or {}).get("tfidf_logreg") or {}).get("val"))
+    st.caption(
+        "Compare runs on validation scores. With this many validation builds, differences of "
+        "about 0.01 are within noise. \"data: different\" means the run was trained on a "
+        "different set of labelled builds (e.g. before re-annotating or re-splitting), so its "
+        "scores are not directly comparable."
+        + (f" For reference, the TF-IDF + logistic regression baseline scores {tfl_val:.3f} "
+           f"val macro-F1 on the served model's data." if tfl_val is not None else ""))
+
+    with st.expander("Test scores"):
+        st.caption("Held-out test scores, for reporting the run you chose on validation. "
+                   "Don't use them to choose between runs: picking by test score turns the "
+                   "test set into a second validation set.")
+        st.dataframe(pd.DataFrame([{
+            "run": r["name"],
+            "test macro-F1": f1(r["test"]),
+            "test accuracy": (r["test"] or {}).get("accuracy"),
+            "TF-IDF baseline test macro-F1": f1((r.get("tfidf_logreg") or {}).get("test")),
+        } for r in runs]), hide_index=True, use_container_width=True,
+            column_config={c: st.column_config.NumberColumn(format="%.3f")
+                           for c in ("test macro-F1", "test accuracy", "TF-IDF baseline test macro-F1")})
+
+    # ---- deploy / delete any run
+    names = [r["name"] for r in runs]
+    by_name = {r["name"]: r for r in runs}
+    a, b, c = st.columns([3, 1, 1], vertical_alignment="bottom")
+    pick = a.selectbox("Run", names, index=names.index(served["name"]) if served else 0)
+    chosen = by_name[pick]
+    if b.button("Deploy", disabled=chosen["served"], use_container_width=True):
+        try:
+            api.deploy_run(pick)
+            st.toast(f"Predict now uses {pick}.")
+        except Exception as e:  # noqa: BLE001
+            st.error(f"Could not deploy: {e}")
+        st.rerun()
+    with c.popover("Delete", disabled=not chosen["deletable"], use_container_width=True):
+        st.write(f"Permanently delete `{pick}` and its files?")
+        if st.button("Delete run", type="primary", key=f"del_{pick}"):
+            try:
+                api.delete_run(pick)
+                st.toast(f"Deleted {pick}.")
+            except Exception as e:  # noqa: BLE001
+                st.error(f"Could not delete: {e}")
+            st.rerun()
+    if not chosen["deletable"]:
+        why = ("it is the default run" if chosen["default"] else
+               "it is being served" if chosen["served"] else
+               "it was not created from this screen")
+        st.caption(f"`{pick}` can't be deleted here: {why}.")
