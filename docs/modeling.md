@@ -32,6 +32,27 @@ Note that the splits are stratified by class but not grouped by tool. Several bu
 
 ## MLP
 
+### Input representation
+
+Build logs are long and the cause of a failure is usually near the first error line or at the end. Each log is reduced to an excerpt before any model sees it (`excerpt.py`):
+
+1. Find the first line matching a list of error patterns (`error:`, `E: `, `fatal:`, `Killed`, `exec format error`, `curl: (N)` and others).
+2. Keep 5 lines before it and 15 after, plus the last 30 lines of the log.
+3. Replace values that differ between builds but carry no failure signal: long hex strings (`<HEX>`), timestamps (`<TS>`) and byte sizes (`<SIZE>`).
+4. Truncate to the last 4,000 characters.
+
+Every model, baselines included, uses the same excerpts.
+
+The MLP needs a fixed-length numeric vector. The final model uses TF-IDF features (`features: tfidf`, implemented in `features.py`):
+
+1. TF-IDF over word unigrams and bigrams and over character 3- to 5-grams within words (at most 50,000 character n-grams; terms must appear in at least two training logs). The word tokenizer keeps tokens such as `libhts-dev` and `setup.py` whole.
+2. Truncated SVD reduces the combined sparse matrix to 256 dense dimensions.
+3. Each dimension is standardized to zero mean and unit variance.
+
+The fitted featurizer (TF-IDF vocabulary, SVD projection and scaling) is saved as `featurizer.joblib`. The network's weights are saved separately in `model.pt`. The network's first layer expects exactly these 256 inputs, so the weights cannot be used without the featurizer.
+
+Note that while the current final model uses the 256-dimensional TF-IDF feature vector, the training procedure can accommodate two other input options: `embed` (384-dimensional sentence embeddings from the pretrained `BAAI/bge-small-en-v1.5` encoder, used frozen) and `both` (the TF-IDF feature vector and the sentence embeddings combined).
+
 ### Training
 
 The MLP is a feed-forward neural network with one hidden layer. The PyTorch implementation handles the key steps in the training process:
@@ -60,27 +81,6 @@ The MLP is a feed-forward neural network with one hidden layer. The PyTorch impl
 | Early-stopping patience | 25 epochs | On validation loss |
 | Class-weighted loss | Yes | Inverse class frequency |
 | Seed | 7400 | |
-
-### Input representation
-
-Build logs are long and the cause of a failure is usually near the first error line or at the end. Each log is reduced to an excerpt before any model sees it (`excerpt.py`):
-
-1. Find the first line matching a list of error patterns (`error:`, `E: `, `fatal:`, `Killed`, `exec format error`, `curl: (N)` and others).
-2. Keep 5 lines before it and 15 after, plus the last 30 lines of the log.
-3. Replace values that differ between builds but carry no failure signal: long hex strings (`<HEX>`), timestamps (`<TS>`) and byte sizes (`<SIZE>`).
-4. Truncate to the last 4,000 characters.
-
-Every model, baselines included, uses the same excerpts.
-
-The MLP needs a fixed-length numeric vector. The final model uses TF-IDF features (`features: tfidf`, implemented in `features.py`):
-
-1. TF-IDF over word unigrams and bigrams and over character 3- to 5-grams within words (at most 50,000 character n-grams; terms must appear in at least two training logs). The word tokenizer keeps tokens such as `libhts-dev` and `setup.py` whole.
-2. Truncated SVD reduces the combined sparse matrix to 256 dense dimensions.
-3. Each dimension is standardized to zero mean and unit variance.
-
-The fitted featurizer (TF-IDF vocabulary, SVD projection and scaling) is saved as `featurizer.joblib`. The network's weights are saved separately in `model.pt`. The network's first layer expects exactly these 256 inputs, so the weights cannot be used without the featurizer.
-
-Note that while the current final model uses the 256-dimensional TF-IDF feature vector, the training procedure can accommodate two other input options: `embed` (384-dimensional sentence embeddings from the pretrained `BAAI/bge-small-en-v1.5` encoder, used frozen) and `both` (the TF-IDF feature vector and the sentence embeddings combined).
 
 ## Benchmarks
 
