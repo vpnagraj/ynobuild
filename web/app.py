@@ -330,7 +330,9 @@ elif screen == "Predict":
     status = api.model_status()
     info = api.model_info() if status and status.get("model_loaded") else None
 
-    head, card = st.columns([3, 1], vertical_alignment="top")
+    # The empty third column is a spacer that keeps the card in from the right edge.
+    head, card, _ = st.columns([5, 2, 1], vertical_alignment="top")
+
     with head:
         st.header("Predict")
         st.caption("Classify a failed build from its log with the trained neural network (MLP) model.")
