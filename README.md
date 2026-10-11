@@ -21,31 +21,33 @@ The failure label space is specified via [`taxonomy/taxonomy_map.yaml`](taxonomy
 - **Backend / database**:  Yes. A FastAPI service owns a SQLite database (delivered as Docker volume), and the Streamlit interface talks to it over HTTP instead of touching the database directly.
 
 ---
- 
+
 ## Architecture
 
-`ynobuild` is containerized with a web app (Streamlit), API (FastAPI), and database (SQLite) as a volume. The tool includes a CLI (called `ynbtriage`) for managing the corpus in the DB. These actions operate as jobs that run separately to populate data and generate data splits for downstream modeling:
- 
+`ynobuild` is containerized with a web app (Streamlit), a data API (FastAPI), a model service (FastAPI with PyTorch), and a database (SQLite) stored on a volume. The tool includes a CLI (called `ynbtriage`) for managing the corpus in the DB. These actions operate as jobs that run separately to populate data and generate data splits for downstream modeling:
+
 ```
                  ┌──────────────┐        HTTP        ┌──────────────┐
    browser  ───▶ │  web         │  ───────────────▶  │  api         │
    :8501         │  Streamlit   │                    │  FastAPI     │
                  └──────┬───────┘                    └──────┬───────┘
-                        │ HTTP                              │ sqlite
-                 ┌──────▼───────┐       ┌───────────────────┴─────────────┐
-                 │  model       │       │          dbdata volume          │
-                 │  FastAPI     │       │          /data/ynobuild.db      │
-                 │  :8001       │       └─────────────────────────────────┘
-                 └──────┬───────┘
-                        │ read-only
-                   ./models/<run>  (written by `ynbtriage train`)
+                        │ HTTP                          ▲   │ sqlite
+                 ┌──────▼───────┐   HTTP: training      │   │
+                 │  model       │   data (no gold)      │   │
+                 │  FastAPI     │ ──────────────────────┘   │
+                 │  :8001       │       ┌───────────────────┴─────────────┐
+                 └──────┬───────┘       │          dbdata volume          │
+                        │ read/write    │          /data/ynobuild.db      │
+                 ./models/<run>         └─────────────────────────────────┘
+       (written by `ynbtriage train` and the Train screen)
+
         jobs (share the volume, run offline via containers with the ynbtriage CLI):
         ingest ── load CSV      fetch ── pull Dockerfiles      splits ── train/val/test/gold
 ```
 
-**NOTE**: The API owns the DB because SQLite is not run on a server, and therefore can't handle multiple container connections. The API acts as the gateway for all DB transactions, and the Streamlit web app never touches SQLite. However, the batch jobs open the DB directly for convenience. WAL mode combined with a 30 second busy-timeout make the occasional overlap wait rather than error.
+**NOTE**: The API owns the DB because SQLite is a file, not a database server, and is not designed for several processes writing to it at the same time. The API acts as the gateway for all DB transactions, and neither the web app nor the model service touches SQLite. The batch jobs open the DB directly for convenience; WAL mode combined with a 30-second busy timeout makes the occasional overlap wait rather than error.
 
-The `model` service serves the trained neural network for the **Predict** screen and retrains it from the **Train** screen. It never touches the DB: it loads a trained model directory from `./models`, classifies log text sent to it, and for training fetches the labelled builds from `api` (`GET /training-data`, which never includes gold). PyTorch is installed only in this image, so `api` and `web` stay small. The web app keeps working if `model` is down; only the Predict screen needs it.
+The `model` service serves the trained neural network for the **Predict** screen and retrains it from the **Train** screen. It never touches the DB: it loads trained model directories from `./models`, classifies log text sent to it, and for training fetches the labelled builds from `api` (`GET /training-data`, which never includes gold). Runs trained from the Train screen are written back to `./models`. PyTorch is installed only in this image, so `api` and `web` stay small. The web app keeps working if `model` is down; only the Predict and Train screens need it.
  
 ---
  
