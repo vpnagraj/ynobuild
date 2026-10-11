@@ -462,7 +462,7 @@ elif screen == "Train":
     with st.container(border=True):
         c1, c2 = st.columns([3, 1], vertical_alignment="center")
         if served:
-            c1.markdown(f"Predict is using **`{served['name']}`** · hidden {fmt_hidden(served['hidden'])} · "
+            c1.markdown(f"Predict is currently using **`{served['name']}`** · hidden {fmt_hidden(served['hidden'])} · "
                         f"val macro-F1 **{f1(served['val']) or float('nan'):.3f}**")
         else:
             c1.markdown("Predict has no model loaded.")
@@ -470,7 +470,7 @@ elif screen == "Train":
             if c2.button(f"Switch back to {default['name']}", use_container_width=True):
                 try:
                     api.deploy_run(default["name"])
-                    st.toast(f"Predict now uses {default['name']}.")
+                    st.toast(f"Predict is now using {default['name']}.")
                 except Exception as e:  # noqa: BLE001
                     st.error(f"Could not switch: {e}")
                 st.rerun()
@@ -508,7 +508,6 @@ elif screen == "Train":
         with st.expander("Advanced"):
             activation = st.selectbox("Activation", acts,
                                       index=acts.index(base["activation"]) if base["activation"] in acts else 0)
-            st.caption("Fixed for all runs: Adam optimizer, batch size 32, early-stopping patience 25, seed 7400.")
         submitted = st.form_submit_button("Train", type="primary", disabled=running is not None)
 
     if running:
@@ -625,13 +624,6 @@ elif screen == "Train":
                                 "val accuracy": st.column_config.NumberColumn(format="%.3f")})
     ref = served or default
     tfl_val = f1(((ref or {}).get("tfidf_logreg") or {}).get("val"))
-    st.caption(
-        "Compare runs on validation scores. With this many validation builds, differences of "
-        "about 0.01 are within noise. \"data: different\" means the run was trained on a "
-        "different set of labelled builds (e.g. before re-annotating or re-splitting), so its "
-        "scores are not directly comparable."
-        + (f" For reference, the TF-IDF + logistic regression baseline scores {tfl_val:.3f} "
-           f"val macro-F1 on the served model's data." if tfl_val is not None else ""))
 
     with st.expander("Test scores"):
         st.caption("Held-out test scores, for reporting the run you chose on validation. "
