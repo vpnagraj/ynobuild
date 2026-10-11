@@ -206,7 +206,7 @@ The main components of the schema are **builds** (one row per build), **taxonomy
 
 ## Modeling
 
-A neural-network classifier that predicts each build's failure category from its log lives in `src/ynbtriage/model/` and runs through the `ynbtriage` CLI (`train`, `predict`, `synth-db`). See [`docs/modeling.md`](docs/modeling.md).
+A neural-network classifier that predicts each build's failure category from its log lives in `src/ynbtriage/model/` and runs through the `ynbtriage` CLI (`train`, `predict`, `synth-db`). See [`docs/modeling.md`](docs/modeling.md) for more about the MLP currently implemented, benchmarking against baseline models, and other details of the modeling approach.
 
 ### Baselines and model size
 
