@@ -10,7 +10,7 @@ The failure label space is specified via [`taxonomy/taxonomy_map.yaml`](taxonomy
 
 - **The data**: Records of failed container (Docker/Apptainer) builds. Each record has a build log and its spec file contents (e.g., Dockerfile) contents. The logs are the main thing being read and labeled.
 
-- **Running it**: Requires Docker and Docker Compose. Run `docker compose build`, load your data with `docker compose run --rm ingest`, then `docker compose up -d api web` and open http://localhost:8501 (or `make demo` to start with a small synthetic dataset).
+- **Running it**: Requires Docker and Docker Compose. Run `docker compose build`, load your data with `docker compose run --rm ingest`, then `docker compose up -d api web model` and open http://localhost:8501 (or `make demo` to start with a small synthetic dataset).
 
 - **Main libraries**: Streamlit for the interface, FastAPI for the backend, and SQLite for storage, with pandas, Typer, and httpx for loading data, the command-line tools, and HTTP requests. Everything runs in Docker containers via Docker Compose.
 
@@ -30,17 +30,22 @@ The failure label space is specified via [`taxonomy/taxonomy_map.yaml`](taxonomy
                  ┌──────────────┐        HTTP        ┌──────────────┐
    browser  ───▶ │  web         │  ───────────────▶  │  api         │
    :8501         │  Streamlit   │                    │  FastAPI     │
-                 └──────────────┘                    └──────┬───────┘
-                                                            │ sqlite
-                              ┌─────────────────────────────┴───────────┐
-                              │            dbdata volume                 │
-                              │            /data/ynobuild.db             │
-                              └─────────────────────────────────────────┘
+                 └──────┬───────┘                    └──────┬───────┘
+                        │ HTTP                              │ sqlite
+                 ┌──────▼───────┐       ┌───────────────────┴─────────────┐
+                 │  model       │       │          dbdata volume          │
+                 │  FastAPI     │       │          /data/ynobuild.db      │
+                 │  :8001       │       └─────────────────────────────────┘
+                 └──────┬───────┘
+                        │ read-only
+                   ./models/<run>  (written by `ynbtriage train`)
         jobs (share the volume, run offline via containers with the ynbtriage CLI):
         ingest ── load CSV      fetch ── pull Dockerfiles      splits ── train/val/test/gold
 ```
 
 **NOTE**: The API owns the DB because SQLite is not run on a server, and therefore can't handle multiple container connections. The API acts as the gateway for all DB transactions, and the Streamlit web app never touches SQLite. However, the batch jobs open the DB directly for convenience. WAL mode combined with a 30 second busy-timeout make the occasional overlap wait rather than error.
+
+The `model` service serves the trained neural network for the **Predict** screen and retrains it from the **Train** screen. It never touches the DB: it loads a trained model directory from `./models`, classifies log text sent to it, and for training fetches the labelled builds from `api` (`GET /training-data`, which never includes gold). PyTorch is installed only in this image, so `api` and `web` stay small. The web app keeps working if `model` is down; only the Predict screen needs it.
  
 ---
  
@@ -119,15 +124,19 @@ docker compose run --rm ingest stats
 To launch the app (with UI running at `http://localhost:8501`):
 
 ```bash
-docker compose up -d api web
+docker compose up -d api web model
 ```
+
+The `model` service serves `./models/final` by default (see [Serving the model](#serving-the-model)). Without a trained model there, the app still runs and the Predict screen says no model is loaded.
 
 #### 5. Use the viewer
 
-With the web app running, connect to a browser to use the viewer. The viewer features two tabs:
+With the web app running, connect to a browser to use the viewer. The viewer features four screens:
 
 - **Browse.** Filter by failure class (and/or leaf), annotation state, split, or free-text search over tool name and log. Open a build to see the Dockerfile and the log tail side by side, with the first failing region presented above.
 - **Annotate.** Look through the queue to add new annotations or confirm existing ones. You can view annotation labels at the class or leaf levels of the failure taxonomy. Use the Confirm/Defer/Skip buttons. Note that builds imported with a predefined label arrive here as prefilled suggestions with the class/leaf pre-selected.
+- **Predict.** Upload a build log (or paste its text) and the trained neural network predicts its failure class. Shows the probability for each class, the part of the log the model based its prediction on, and how the served model scored against the TF-IDF baseline on held-out test data. Nothing entered here is saved.
+- **Train.** Retrain the neural network with different hyperparameters (hidden layers, learning rate, dropout, epochs, input features; activation under Advanced) and watch the training and validation loss curves update live. Each run is saved as a new `models/ui-<timestamp>` directory and compared with the served model and the TF-IDF baseline on validation data; test scores are tucked into an expandable section. **Deploy** makes a run the one Predict uses; **Switch back to final** returns to the default model at any time. Runs made here can be deleted; `final` and the currently served run cannot.
  
 ---
  
@@ -188,8 +197,65 @@ The main components of the schema are **builds** (one row per build), **taxonomy
  
 - **Database is locked**: The DB can become locked when a job and the API wrote at the same time. Bring the app down (`docker compose stop api web`), run the job, bring it back up.
 - **UI says "cannot reach the API"**: `docker compose ps` and wait for `api` to be healthy, then reload.
+- **Train says "could not start training" or a run fails while "loading data"**: the `model` service reaches the labelled data through `api`; check that `api` is healthy (`docker compose ps`). A "not writable" error means `./models` is mounted read-only; check the `model` volumes in `docker-compose.yml`.
+- **Predict says "cannot reach the model service" or "no model loaded"**: check `docker compose ps` and `docker compose logs model`. "No model loaded" means `./models/final` (or `./models/$YNB_MODEL_NAME`) is missing or incomplete; it needs `model.pt` and `featurizer.joblib` from `ynbtriage train`.
 - **Dockerfile fetch returns `not_found`**: The path in the CSV didn't resolve on the repo's default / `main` / `master` branch. This could be because the repo moved, was renamed, or the path is stale. See paths fetched in `src/ynbtriage/fetch.py` and adjust `CANDIDATE_PATHS` in that module if needed.
 - **Rebuild after code changes**: `docker compose build <service>` then `up -d`.
+
+---
+
+## Modeling
+
+A neural-network classifier that predicts each build's failure category from its log lives in `src/ynbtriage/model/` and runs through the `ynbtriage` CLI (`train`, `predict`, `synth-db`). See [`docs/modeling.md`](docs/modeling.md) for more about the MLP currently implemented, benchmarking against baseline models, and other details of the modeling approach.
+
+### Baselines and model size
+
+`ynbtriage train` scores three shallow baselines on the same splits as the MLP: majority class, Naive Bayes on word counts, and TF-IDF + logistic regression. To add baselines to an existing run without retraining it, write a `baselines.json` next to it; the Predict screen's Baselines list picks it up:
+
+```bash
+ynbtriage baselines --db ynobuild.snapshot.db --out models/final
+```
+
+New runs store the featurizer compactly (float32 projection, compressed). To shrink a run saved before that, without changing its predictions (it checks first and refuses to write if any predicted label would change):
+
+```bash
+ynbtriage shrink-model models/final --db ynobuild.snapshot.db
+```
+
+### Serving the model
+
+The `model` service loads a directory written by `ynbtriage train`, mounted from `./models`. By default it serves `./models/final`, the **default run**:
+
+```bash
+## train (locally, in a Python environment with the [model] extra) into models/final
+ynbtriage train --db ynobuild.snapshot.db --out models/final --features tfidf
+
+## build and start the model service
+docker compose build model
+docker compose up -d model
+```
+
+To deploy a different (e.g. improved) run without renaming it, point the service at it and restart:
+
+```bash
+YNB_MODEL_NAME=run-002 docker compose up -d model
+```
+
+The default run is protected: it can't be deleted from the app, Train-screen runs never overwrite it, and restarting the `model` service always serves it again. Deploying a run from the Train screen swaps the served model in memory only; to *start* on a different run after a restart, use `YNB_MODEL_NAME` as above.
+
+The service's own endpoints are at http://localhost:8001/docs:
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /health`, `GET /model` | status; which run is served, its architecture and val/test scores |
+| `POST /predict` | classify `{"log": "..."}` |
+| `POST /train` | start a training run (one at a time) with `hidden`, `lr`, `dropout`, `epochs`, `features`, `activation` |
+| `GET /train/{id}`, `GET /train/latest`, `POST /train/{id}/cancel` | progress (per-epoch losses), result, cancel |
+| `GET /runs` | every run in `./models` with its settings and scores |
+| `POST /deploy` | serve a different run (`{"run": "ui-..."}`) |
+| `DELETE /runs/{name}` | delete a Train-screen run (not the default or the served run) |
+
+Training needs the `api` service running, since that is where the labelled data comes from. Runs created from the Train screen are written by the container; on Linux hosts they may be owned by root, so delete them from the app (or with `sudo`).
 
 ---
 

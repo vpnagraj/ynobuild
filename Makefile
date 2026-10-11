@@ -8,8 +8,8 @@ help:
 	@echo "  fetch       Fetch Dockerfiles from GitHub/GitLab (one-shot job)"
 	@echo "  splits      Assign train/val/test/gold splits (one-shot job)"
 	@echo "  stats       Print corpus stats"
-	@echo "  up / down   Start / stop api+web"
-	@echo "  logs        Tail api+web logs"
+	@echo "  up / down   Start / stop api+web+model"
+	@echo "  logs        Tail api+web+model logs"
 	@echo "  shell       sqlite3 shell into the DB volume"
 	@echo "  clean       Stop everything and delete the DB volume"
 
@@ -17,15 +17,16 @@ build:
 	docker compose build
 
 up:
-	docker compose up -d api web
-	@echo "UI:  http://localhost:8501"
-	@echo "API: http://localhost:8000/docs"
+	docker compose up -d api web model
+	@echo "UI:    http://localhost:8501"
+	@echo "API:   http://localhost:8000/docs"
+	@echo "Model: http://localhost:8001/docs"
 
 down:
 	docker compose down
 
 logs:
-	docker compose logs -f api web
+	docker compose logs -f api web model
 
 demo: build
 	docker compose run --rm ingest demo-seed

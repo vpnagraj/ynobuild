@@ -1,0 +1,308 @@
+{
+  "target": "class",
+  "features": "tfidf",
+  "include_prefilled": false,
+  "labels": [
+    "environment_decay",
+    "recipe_error",
+    "build_execution"
+  ],
+  "labels_dropped_no_train_rows": [],
+  "train_config": {
+    "hidden": [
+      64
+    ],
+    "activation": "relu",
+    "dropout": 0.2,
+    "optimizer": "adam",
+    "lr": 0.001,
+    "momentum": 0.0,
+    "weight_decay": 0.0001,
+    "epochs": 200,
+    "batch_size": 32,
+    "patience": 25,
+    "class_weighted": true,
+    "seed": 7400,
+    "extra": {}
+  },
+  "epochs_run": 40,
+  "best_epoch": 15,
+  "n": {
+    "train": 522,
+    "val": 156,
+    "test": 156
+  },
+  "n_silver_in_train": 0,
+  "train_label_counts": {
+    "environment_decay": 189,
+    "build_execution": 172,
+    "recipe_error": 161
+  },
+  "leakage": {
+    "tools_total": 480,
+    "tools_in_multiple_splits": 98,
+    "test_rows_whose_tool_is_also_in_train": 82,
+    "test_rows": 156
+  },
+  "data_fingerprint": {
+    "hash": "2ee36a194350",
+    "n": {
+      "train": 522,
+      "val": 156,
+      "test": 156
+    }
+  },
+  "baselines": {
+    "majority": {
+      "val": {
+        "n": 156,
+        "accuracy": 0.358974358974359,
+        "macro_f1": 0.1761006289308176,
+        "per_class_f1": {
+          "environment_decay": 0.5283018867924528,
+          "recipe_error": 0.0,
+          "build_execution": 0.0
+        },
+        "confusion": [
+          [
+            56,
+            0,
+            0
+          ],
+          [
+            48,
+            0,
+            0
+          ],
+          [
+            52,
+            0,
+            0
+          ]
+        ]
+      },
+      "test": {
+        "n": 156,
+        "accuracy": 0.358974358974359,
+        "macro_f1": 0.1761006289308176,
+        "per_class_f1": {
+          "environment_decay": 0.5283018867924528,
+          "recipe_error": 0.0,
+          "build_execution": 0.0
+        },
+        "confusion": [
+          [
+            56,
+            0,
+            0
+          ],
+          [
+            48,
+            0,
+            0
+          ],
+          [
+            52,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    "naive_bayes": {
+      "val": {
+        "n": 156,
+        "accuracy": 0.8076923076923077,
+        "macro_f1": 0.8113936045868572,
+        "per_class_f1": {
+          "environment_decay": 0.7818181818181819,
+          "recipe_error": 0.8817204301075269,
+          "build_execution": 0.7706422018348624
+        },
+        "confusion": [
+          [
+            43,
+            2,
+            11
+          ],
+          [
+            3,
+            41,
+            4
+          ],
+          [
+            8,
+            2,
+            42
+          ]
+        ]
+      },
+      "test": {
+        "n": 156,
+        "accuracy": 0.8910256410256411,
+        "macro_f1": 0.891726921376517,
+        "per_class_f1": {
+          "environment_decay": 0.8888888888888888,
+          "recipe_error": 0.9183673469387755,
+          "build_execution": 0.8679245283018868
+        },
+        "confusion": [
+          [
+            48,
+            2,
+            6
+          ],
+          [
+            1,
+            45,
+            2
+          ],
+          [
+            3,
+            3,
+            46
+          ]
+        ]
+      }
+    },
+    "tfidf_logreg": {
+      "val": {
+        "n": 156,
+        "accuracy": 0.8653846153846154,
+        "macro_f1": 0.87000874433196,
+        "per_class_f1": {
+          "environment_decay": 0.8347826086956521,
+          "recipe_error": 0.945054945054945,
+          "build_execution": 0.8301886792452831
+        },
+        "confusion": [
+          [
+            48,
+            0,
+            8
+          ],
+          [
+            3,
+            43,
+            2
+          ],
+          [
+            8,
+            0,
+            44
+          ]
+        ]
+      },
+      "test": {
+        "n": 156,
+        "accuracy": 0.9166666666666666,
+        "macro_f1": 0.9181435130242984,
+        "per_class_f1": {
+          "environment_decay": 0.9043478260869565,
+          "recipe_error": 0.946236559139785,
+          "build_execution": 0.9038461538461539
+        },
+        "confusion": [
+          [
+            52,
+            0,
+            4
+          ],
+          [
+            3,
+            44,
+            1
+          ],
+          [
+            4,
+            1,
+            47
+          ]
+        ]
+      }
+    }
+  },
+  "mlp": {
+    "train": {
+      "n": 522,
+      "accuracy": 1.0,
+      "macro_f1": 1.0,
+      "per_class_f1": {
+        "environment_decay": 1.0,
+        "recipe_error": 1.0,
+        "build_execution": 1.0
+      },
+      "confusion": [
+        [
+          189,
+          0,
+          0
+        ],
+        [
+          0,
+          161,
+          0
+        ],
+        [
+          0,
+          0,
+          172
+        ]
+      ]
+    },
+    "val": {
+      "n": 156,
+      "accuracy": 0.8461538461538461,
+      "macro_f1": 0.8517999242137173,
+      "per_class_f1": {
+        "environment_decay": 0.8103448275862069,
+        "recipe_error": 0.945054945054945,
+        "build_execution": 0.8
+      },
+      "confusion": [
+        [
+          47,
+          0,
+          9
+        ],
+        [
+          3,
+          43,
+          2
+        ],
+        [
+          10,
+          0,
+          42
+        ]
+      ]
+    },
+    "test": {
+      "n": 156,
+      "accuracy": 0.9230769230769231,
+      "macro_f1": 0.9240836395997203,
+      "per_class_f1": {
+        "environment_decay": 0.9203539823008849,
+        "recipe_error": 0.946236559139785,
+        "build_execution": 0.9056603773584906
+      },
+      "confusion": [
+        [
+          52,
+          0,
+          4
+        ],
+        [
+          2,
+          44,
+          2
+        ],
+        [
+          3,
+          1,
+          48
+        ]
+      ]
+    }
+  }
+}

@@ -4,7 +4,9 @@ name: ynobuild
 #   api  — long-running; owns the SQLite DB on the `dbdata` volume. Its image
 #          (ynobuild-app) also contains the `ynbtriage` CLI, so the batch jobs
 #          below REUSE it instead of building their own.
-#   web  — long-running Streamlit UI, talks to api over HTTP.
+#   web  — long-running Streamlit UI, talks to api (and model) over HTTP.
+#   model — long-running model-serving API (see below). web works without it;
+#          only the Predict screen needs it.
 #   ingest / fetch / splits — one-shot batch jobs (profile: jobs). They have no
 #          build of their own; they run the api image. Because `docker compose
 #          build` always rebuilds api (it is not profiled), the jobs are always
@@ -37,12 +39,42 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  # model — long-running; serves the trained MLP (Predict screen) and retrains it
+  #         (Train screen). Never touches the DB: training data comes from api's
+  #         /training-data endpoint. Serves ./models/<YNB_MODEL_NAME> (default:
+  #         final) at startup; that default run can't be deleted, and a restart
+  #         always returns to it. Train-screen runs are written to ./models/ui-*,
+  #         so ./models is mounted read-write. To start on a different run:
+  #           YNB_MODEL_NAME=run-002 docker compose up -d model
+  model:
+    image: ynobuild-model
+    build:
+      context: .
+      target: model
+    environment:
+      YNB_MODEL_DIR: /models/${YNB_MODEL_NAME:-final}
+      YNB_API_URL: http://api:8000
+    volumes:
+      - ./models:/models
+      - hfcache:/cache/hf
+    ports:
+      - "8001:8001"
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8001/health').status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
   web:
     build:
       context: .
       target: web
     environment:
       YNB_API_URL: http://api:8000
+      YNB_MODEL_URL: http://model:8001
       YNB_ANNOTATOR: ${YNB_ANNOTATOR:-vp}
     ports:
       - "8501:8501"
@@ -93,3 +125,4 @@ services:
 
 volumes:
   dbdata:
+  hfcache:

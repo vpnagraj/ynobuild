@@ -45,3 +45,6 @@ Thumbs.db
 .vscode/
 *.swp
 *~
+
+# ---- Modeling caches (embedding cache is regenerable) ----
+.cache/
