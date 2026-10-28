@@ -55,6 +55,24 @@ def test_pipeline_end_to_end(tmp_path):
     assert abs(sum(pred["probabilities"].values()) - 1) < 1e-5
 
 
+def test_train_mlp_accepts_custom_model():
+    import numpy as np
+    from torch import nn
+    from ynbtriage.model.train import TrainConfig, train_mlp
+
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(60, 8)).astype("float32")
+    y = (X[:, 0] > 0).astype(int)
+    built = []
+
+    def model_fn(in_dim, n_classes):
+        built.append((in_dim, n_classes))
+        return nn.Linear(in_dim, n_classes)
+
+    model, hist = train_mlp(X, y, X, y, 2, TrainConfig(epochs=3, patience=0), model_fn=model_fn)
+    assert built == [(8, 2)] and isinstance(model, nn.Linear) and len(hist) == 3
+
+
 def test_synth_refuses_real_db(tmp_path):
     from ynbtriage.db import ensure_schema, get_conn
     from ynbtriage.model.synth import synth_db

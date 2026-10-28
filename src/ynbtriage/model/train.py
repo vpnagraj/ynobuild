@@ -68,11 +68,17 @@ def _evaluate(model, X, y, loss_fn):
 
 def train_mlp(X_train: np.ndarray, y_train: np.ndarray, X_val: np.ndarray, y_val: np.ndarray,
               n_classes: int, cfg: TrainConfig | None = None,
-              on_epoch: Callable[[dict], None] | None = None):
+              on_epoch: Callable[[dict], None] | None = None,
+              model_fn: Callable[[int, int], nn.Module] | None = None):
     """Train an MLP; return (best model, history list of per-epoch dicts).
 
     `on_epoch` is called after every epoch with that epoch's metrics. The CLI uses
     it to print; a Streamlit training monitor can use it to update a live chart.
+
+    `model_fn(in_dim, n_classes)` swaps in a different network: any nn.Module that
+    maps a (batch, in_dim) float tensor to (batch, n_classes) logits. It is called
+    after seeding, so weight init is reproducible. Default: the MLP built from cfg.
+    experiments/ uses this to train new architectures with this exact loop.
     """
     cfg = cfg or TrainConfig()
     torch.manual_seed(cfg.seed)
@@ -87,7 +93,10 @@ def train_mlp(X_train: np.ndarray, y_train: np.ndarray, X_val: np.ndarray, y_val
     # nn.Linear initializes its weights randomly (Kaiming-uniform) and biases
     # small. Random init breaks symmetry: if all weights started equal, every
     # hidden unit would compute the same thing and receive the same gradient.
-    model = MLP(Xtr.shape[1], n_classes, tuple(cfg.hidden), cfg.activation, cfg.dropout)
+    if model_fn is not None:
+        model = model_fn(Xtr.shape[1], n_classes)
+    else:
+        model = MLP(Xtr.shape[1], n_classes, tuple(cfg.hidden), cfg.activation, cfg.dropout)
 
     # Loss: cross-entropy = -log(softmax(logits)[true class]), averaged over the
     # batch. With class weights, mistakes on rare classes cost more.
