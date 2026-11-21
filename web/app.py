@@ -18,7 +18,7 @@ import streamlit as st
 
 import api_client as api
 
-st.set_page_config(page_title="ynobuild", layout="wide")
+st.set_page_config(page_title="ynobuild", page_icon=":material/build_circle:", layout="wide")
 
 DEFAULT_ANNOTATOR = os.environ.get("YNB_ANNOTATOR", "unknown")
 
@@ -78,26 +78,39 @@ if not api.health():
     st.error(f"Cannot reach the API at {api.API_URL}. Is the `api` service up?")
     st.stop()
 
-st.sidebar.title("ynobuild")
-screen = st.sidebar.radio("Screen", ["Browse", "Annotate", "Predict", "Train"])
+SCREEN_ICONS = {
+    "Browse": ":material/table_rows:",
+    "Annotate": ":material/label:",
+    "Predict": ":material/psychology:",
+    "Train": ":material/model_training:",
+}
+
+st.sidebar.markdown("## :material/build_circle: ynobuild")
+st.sidebar.caption("Container build-failure triage")
+screen = st.sidebar.radio("Screen", list(SCREEN_ICONS), label_visibility="collapsed",
+                          format_func=lambda s: f"{SCREEN_ICONS[s]} {s}")
 annotator = st.sidebar.text_input("Annotator", value=DEFAULT_ANNOTATOR)
 
 stats = api.get_stats()
-st.sidebar.markdown("**Corpus**")
-st.sidebar.write(
-    f"{stats['total_builds']} builds · {stats['annotated']} labelled · "
-    f"{stats.get('prefilled', 0)} prefilled · {stats['deferred']} deferred · "
-    f"{stats['unannotated']} to do"
-)
+st.sidebar.divider()
+st.sidebar.markdown("##### Corpus")
+m1, m2 = st.sidebar.columns(2)
+m1.metric("Builds", stats["total_builds"])
+m2.metric("Labelled", stats["annotated"])
+m1.metric("To do", stats["unannotated"])
+m2.metric("Deferred", stats["deferred"])
+if stats.get("prefilled"):
+    st.sidebar.caption(f"{stats['prefilled']} prefilled suggestion(s) awaiting review")
 if stats.get("by_class"):
-    st.sidebar.markdown("**By class**")
+    st.sidebar.markdown("##### By class")
+    labelled = max(sum(stats["by_class"].values()), 1)
     for cid, n in stats["by_class"].items():
-        st.sidebar.write(f"- {cid}: {n}")
+        st.sidebar.progress(n / labelled, text=f"{cid} · {n}")
 if stats.get("by_split"):
-    st.sidebar.markdown("**Splits**")
-    st.sidebar.write(", ".join(f"{k}={v}" for k, v in stats["by_split"].items()))
+    st.sidebar.markdown("##### Splits")
+    st.sidebar.caption(" · ".join(f"{k} **{v}**" for k, v in stats["by_split"].items()))
 
-with st.sidebar.expander("Maintenance"):
+with st.sidebar.expander("Maintenance", icon=":material/construction:"):
     st.caption("Delete builds whose log is the `[no logs]` sentinel.")
     if st.button("Scan for [no logs] builds"):
         st.session_state.no_log_count = api.prune_no_logs(dry_run=True)["count"]
