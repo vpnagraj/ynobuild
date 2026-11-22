@@ -1,0 +1,57 @@
+# Streamlit config for the ynobuild UI. Copied to /app/.streamlit in the web image
+# (streamlit reads .streamlit/ from the directory it is launched in).
+
+[client]
+# "viewer" hides developer items (rerun, clear cache, deploy) but keeps the viewer
+# items in the ⋮ menu: Print, the light/dark toggle and "Record screen".
+# Do NOT use "minimal": it removes "Record screen". Screen recording also needs a
+# secure context, i.e. open the UI at http://localhost:8501 or over HTTPS.
+toolbarMode = "viewer"
+
+[theme]
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap, sans-serif"
+headingFont = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap, sans-serif"
+codeFont = "'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap, monospace"
+codeFontSize = "0.8rem"
+baseRadius = "0.5rem"
+buttonRadius = "0.5rem"
+showWidgetBorder = true
+showSidebarBorder = true
+linkUnderline = false
+chartCategoricalColors = ["#0f766e", "#d97706", "#2563eb", "#be185d", "#65a30d", "#7c3aed", "#0891b2", "#dc2626"]
+
+# ---- light: slate neutrals, teal primary, amber accents
+[theme.light]
+primaryColor = "#0f766e"
+backgroundColor = "#f8fafc"
+secondaryBackgroundColor = "#eef2f6"
+textColor = "#0f172a"
+borderColor = "#d5dde6"
+linkColor = "#0f766e"
+codeBackgroundColor = "#eef2f6"
+dataframeHeaderBackgroundColor = "#e6ecf2"
+orangeColor = "#d97706"
+yellowColor = "#d97706"
+
+[theme.light.sidebar]
+backgroundColor = "#eaf1f1"
+secondaryBackgroundColor = "#dbe7e7"
+borderColor = "#c8d6d6"
+
+# ---- dark: deep slate, bright teal primary
+[theme.dark]
+primaryColor = "#2dd4bf"
+backgroundColor = "#0b1220"
+secondaryBackgroundColor = "#151e2e"
+textColor = "#e2e8f0"
+borderColor = "#263244"
+linkColor = "#5eead4"
+codeBackgroundColor = "#070c16"
+dataframeHeaderBackgroundColor = "#151e2e"
+orangeColor = "#f59e0b"
+yellowColor = "#f59e0b"
+
+[theme.dark.sidebar]
+backgroundColor = "#0f1a28"
+secondaryBackgroundColor = "#18263a"
+borderColor = "#263244"

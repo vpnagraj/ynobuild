@@ -72,6 +72,9 @@ The `Makefile` includes a `demo` command that wraps the `docker compose build`, 
 ## API: http://localhost:8000/docs
 make demo
 ```
+
+The UI theme (fonts, colors, light and dark variants) is set in `web/.streamlit/config.toml`. To record a screencast of the UI, open the ⋮ menu at the top right and choose **Record screen**. This works in Chrome, Edge or Firefox when the UI is opened at `http://localhost:8501` or over HTTPS.
+
 ---
  
 ### Basic usage
