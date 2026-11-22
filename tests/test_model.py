@@ -17,15 +17,66 @@ def test_manual_backprop_matches_autograd():
         assert torch.allclose(a, b, atol=1e-10)
 
 
-def test_excerpt_keeps_error_and_tail():
-    from ynbtriage.model.excerpt import error_excerpt
+def test_default_excerpt_keeps_only_the_tail():
+    from ynbtriage.model.excerpt import log_excerpt
+
+    log = "\n".join([f"early {i}" for i in range(200)] + ["E: Unable to locate package foo"]
+                    + [f"after {i}" for i in range(5)])
+    ex = log_excerpt(log, tail=6)
+    assert "Unable to locate package" in ex          # within the last 6 lines
+    assert "after 4" in ex
+    assert "early 199" not in ex
+    assert log_excerpt("") == ""
+
+
+def test_excerpt_normalizes_and_caps():
+    from ynbtriage.model.excerpt import log_excerpt
+
+    ex = log_excerpt("pulled sha256:" + "a" * 64 + " at 2024-01-02 03:04:05 (12.5 MB)")
+    assert "<HEX>" in ex and "<TS>" in ex and "<SIZE>" in ex
+    assert len(log_excerpt("x" * 10_000, max_chars=100)) == 100
+
+
+def test_error_window_excerpt_keeps_error_and_tail():
+    from ynbtriage.model.excerpt import error_excerpt, log_excerpt
 
     log = "\n".join([f"noise {i}" for i in range(200)] + ["E: Unable to locate package foo"]
                     + [f"after {i}" for i in range(100)])
-    ex = error_excerpt(log, before=2, after=2, tail=5)
+    ex = log_excerpt(log, "error_window", before=2, after=2, tail=5)
     assert "Unable to locate package" in ex
     assert "after 99" in ex
     assert "noise 0" not in ex
+    assert error_excerpt(log, before=2, after=2, tail=5) == ex
+    assert "Unable to locate package" not in log_excerpt(log, "tail", tail=5)
+
+
+def test_unknown_excerpt_rule_is_rejected():
+    import pytest
+    from ynbtriage.model.excerpt import log_excerpt
+
+    with pytest.raises(ValueError, match="unknown excerpt rule"):
+        log_excerpt("x", "first_line")
+
+
+def test_rule_is_recorded_and_reused_at_prediction(tmp_path):
+    import torch
+    from ynbtriage.model.pipeline import run
+    from ynbtriage.model.predict import Predictor
+    from ynbtriage.model.synth import synth_db
+    from ynbtriage.model.train import TrainConfig
+
+    synth_db(tmp_path / "s.db", n=200)
+    cfg = TrainConfig(epochs=3, patience=0)
+    for rule in ("tail", "error_window"):
+        out = tmp_path / rule
+        run(out, db_path=tmp_path / "s.db", features="tfidf", cfg=cfg, excerpt=rule)
+        assert Predictor.load(out).excerpt == rule
+
+    # a model saved before the rule was recorded falls back to the original rule
+    ckpt = torch.load(tmp_path / "tail" / "model.pt", weights_only=False)
+    del ckpt["excerpt"]
+    torch.save(ckpt, tmp_path / "tail" / "model.pt")
+    assert Predictor.load(tmp_path / "tail").excerpt == "error_window"
 
 
 def test_pipeline_end_to_end(tmp_path):

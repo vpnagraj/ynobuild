@@ -2,12 +2,13 @@
 
 This directory contains notebooks and helper modules for modeling experiments. The `ynobuild` tool itself (app, API, CLI, and the served model) are maintained separately in the repo. The experiments reuse `ynobuild` components and modeling artifiacts (data loading, splits, featurizers, the training loop, metrics, and baselines) so results are directly comparable to the model in `models/final/`.
 
-Currently there is one experiment investigating a two-stream MLP with a learned gate.
+Currently there are two experiments: one investigating a two-stream MLP with a learned gate, and a follow-up that checks whether the error window can be dropped from the log excerpt altogether.
 
 | File | Purpose |
 |---|---|
 | `01_two_stream_gate.ipynb` | Runs the experiment end to end by training the original MLP and the two-stream model, comparing them, and measuring what the gate learned |
 | `two_stream.py` | Includes functions for the new approach (excerpt splitting, the two-stream model, the multi-seed runner, and the evaluation metrics) |
+| `02_tail_only.ipynb` | Retrains the original MLP on tail-only excerpts (last 30, 50, and 80 lines) and compares each to the current excerpt, as a check before simplifying the app's input pipeline |
 
 ---
 

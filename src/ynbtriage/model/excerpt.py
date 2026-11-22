@@ -1,16 +1,33 @@
-"""Reduce a log tail to the part that carries the failure signal.
+"""Reduce a log tail to the part the model reads.
 
-Logs are long and the cause is usually near the first error line and at the very
-end. Sentence encoders truncate at 256-512 tokens, so feeding the raw tail would
-often cut off exactly the part that matters. Every model (baselines included)
-sees the SAME excerpt, so comparisons measure the model, not the input.
+Two rules are available. Every model (baselines included) in a run sees the SAME
+excerpt, so comparisons measure the model, not the input. The rule a model was
+trained with is recorded in its model.pt and metrics.json, and used again at
+prediction time.
 
-ERROR_PATTERNS mirrors web/app.py (the web image does not install ynbtriage, so
+    tail          The last 30 lines. The default. A failed build stops right
+                  after it fails, so the end of the log usually holds the real
+                  error and its summary messages.
+    error_window  The original rule: the 5 lines before and 15 after the first
+                  line matching ERROR_PATTERNS, plus the last 30 lines. Models
+                  trained before the rule was recorded used this one.
+
+The experiments in experiments/ showed the error window adds nothing over the
+tail alone (docs/experiments.md, experiments/02_tail_only.ipynb), which is why
+`tail` is the default. `error_window` is kept so those experiments and older
+models still work.
+
+ERROR_PATTERNS mirrors web/app.py, which uses the list to highlight the failing
+region for people reading a log (the web image does not install ynbtriage, so
 the list is duplicated). If you change one, change the other.
 """
 from __future__ import annotations
 
 import re
+
+EXCERPT_RULES = ("tail", "error_window")
+DEFAULT_EXCERPT = "tail"
+LEGACY_EXCERPT = "error_window"   # what a model.pt without a recorded rule was trained with
 
 ERROR_PATTERNS = [
     r"error:", r"\bE:\s", r"fatal error", r"fatal:", r"\bKilled\b", r"No space left",
@@ -35,22 +52,33 @@ def normalize(text: str) -> str:
     return text
 
 
-def error_excerpt(log: str, before: int = 5, after: int = 15, tail: int = 30,
-                  max_chars: int = 4000) -> str:
-    """Lines around the first error match, plus the last `tail` lines.
+def check_rule(rule: str) -> str:
+    if rule not in EXCERPT_RULES:
+        raise ValueError(f"unknown excerpt rule {rule!r} ({' | '.join(EXCERPT_RULES)})")
+    return rule
 
-    Overlapping windows are merged, order is preserved, and the result is
-    normalized and capped at `max_chars` (keeping the end, where the cause
-    usually is).
+
+def log_excerpt(log: str, rule: str = DEFAULT_EXCERPT, tail: int = 30, before: int = 5,
+                after: int = 15, max_chars: int = 4000) -> str:
+    """Apply an excerpt rule (see the module docstring).
+
+    The result is normalized and capped at `max_chars`, keeping the end, where
+    the cause usually is. `before` and `after` only apply to `error_window`.
     """
+    check_rule(rule)
     lines = (log or "").splitlines()
     if not lines:
         return ""
     keep: set[int] = set(range(max(0, len(lines) - tail), len(lines)))
-    for i, ln in enumerate(lines):
-        if _ERR_RE.search(ln):
-            keep.update(range(max(0, i - before), min(len(lines), i + after + 1)))
-            break
+    if rule == "error_window":
+        for i, ln in enumerate(lines):
+            if _ERR_RE.search(ln):
+                keep.update(range(max(0, i - before), min(len(lines), i + after + 1)))
+                break
     text = "\n".join(lines[i] for i in sorted(keep))
-    text = normalize(text)
-    return text[-max_chars:]
+    return normalize(text)[-max_chars:]
+
+
+def error_excerpt(log: str, **kwargs) -> str:
+    """The original rule under its original name (same as rule="error_window")."""
+    return log_excerpt(log, rule="error_window", **kwargs)

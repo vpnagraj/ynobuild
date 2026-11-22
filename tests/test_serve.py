@@ -40,7 +40,7 @@ def test_predict_with_model(trained_model, monkeypatch):
         assert body["label"] in info["labels"]
         assert abs(sum(body["probabilities"].values()) - 1) < 1e-5
         assert "Release file" in body["excerpt"]
-        assert body["error_line_found"] is True
+        assert "error_line_found" not in body
 
         assert c.post("/predict", json={"log": "   "}).status_code == 422
 

@@ -2,7 +2,7 @@
 
 An artifact directory holds everything needed to reproduce and serve a run:
 
-    model.pt          MLP weights + architecture config + label names
+    model.pt          MLP weights + architecture config + label names + excerpt rule
     featurizer.joblib fitted featurizer (TF-IDF vocab/SVD; encoder name only)
     metrics.json      config, data summary, leakage report, val/test scores
                       for the MLP and every baseline
@@ -21,6 +21,7 @@ import torch
 
 from . import baselines
 from .data import label_order, leakage_report, load_dataset
+from .excerpt import DEFAULT_EXCERPT, LEGACY_EXCERPT, check_rule
 from .features import make_featurizer
 from .metrics import predict_labels, score
 from .train import TrainConfig, train_mlp
@@ -29,14 +30,15 @@ TRAIN_COLOR, VAL_COLOR = "#2a78d6", "#eb6834"
 
 
 def run(out_dir, db_path=None, target="class", features="embed", include_prefilled=False,
-        cfg: TrainConfig | None = None, tfidf_dim=256, on_epoch=None) -> dict:
+        cfg: TrainConfig | None = None, tfidf_dim=256, on_epoch=None,
+        excerpt: str = DEFAULT_EXCERPT) -> dict:
     """Train from the database (used by the `ynbtriage train` CLI)."""
-    df = load_dataset(db_path, target=target, include_prefilled=include_prefilled)
+    df = load_dataset(db_path, target=target, include_prefilled=include_prefilled, excerpt=excerpt)
     all_labels = label_order(db_path, target)
     try:
         return run_df(out_dir, df, all_labels, target=target, features=features,
                       include_prefilled=include_prefilled, cfg=cfg, tfidf_dim=tfidf_dim,
-                      on_epoch=on_epoch)
+                      on_epoch=on_epoch, excerpt=excerpt)
     except ValueError as e:
         raise SystemExit(str(e)) from e
 
@@ -83,20 +85,26 @@ def fit_baselines(texts: dict, y: dict, labels: list[str], seed: int = 7400) -> 
             for name, m in models.items()}
 
 
-def run_baselines(out_dir, db_path=None, target="class", seed: int = 7400) -> dict:
+def run_baselines(out_dir, db_path=None, target="class", seed: int = 7400,
+                  excerpt: str | None = None) -> dict:
     """Score only the shallow baselines and write <out_dir>/baselines.json.
 
     For adding baselines to an existing run without retraining (or touching) its
-    MLP. The model service shows these alongside the run's own metrics.
+    MLP. The model service shows these alongside the run's own metrics. Uses the
+    run's own excerpt rule (from its metrics.json) unless `excerpt` is given.
     """
-    df = load_dataset(db_path, target=target)
+    if excerpt is None:
+        mpath = Path(out_dir) / "metrics.json"
+        m = json.loads(mpath.read_text()) if mpath.exists() else {}
+        excerpt = m.get("excerpt", LEGACY_EXCERPT if m else DEFAULT_EXCERPT)
+    df = load_dataset(db_path, target=target, excerpt=excerpt)
     all_labels = label_order(db_path, target)
     try:
         df, labels, _, parts, y, texts = prepare(df, all_labels)
     except ValueError as e:
         raise SystemExit(str(e)) from e
     out = {
-        "target": target, "labels": labels, "seed": seed,
+        "target": target, "labels": labels, "seed": seed, "excerpt": excerpt,
         "n": {s: int(len(d)) for s, d in parts.items()},
         "data_fingerprint": data_fingerprint(df),
         "baselines": fit_baselines(texts, y, labels, seed=seed),
@@ -109,12 +117,15 @@ def run_baselines(out_dir, db_path=None, target="class", seed: int = 7400) -> di
 
 def run_df(out_dir, df: pd.DataFrame, all_labels: list[str], target="class", features="embed",
            include_prefilled=False, cfg: TrainConfig | None = None, tfidf_dim=256,
-           on_epoch=None, extra: dict | None = None) -> dict:
+           on_epoch=None, extra: dict | None = None, excerpt: str = DEFAULT_EXCERPT) -> dict:
     """Train from an already-loaded dataset (columns as returned by data.load_dataset).
 
     Used directly by the model service, which gets its data from the api service
     rather than opening the database. `extra` is merged into metrics.json.
+    `excerpt` names the rule `df["text"]` was built with; it is recorded so the
+    model is served with the same rule.
     """
+    check_rule(excerpt)
     cfg = cfg or TrainConfig()
     out = Path(out_dir)
 
@@ -142,13 +153,14 @@ def run_df(out_dir, df: pd.DataFrame, all_labels: list[str], target="class", fea
     import joblib
     out.mkdir(parents=True, exist_ok=True)
     torch.save({"state_dict": model.state_dict(), "config": model.config, "labels": labels,
-                "target": target, "features": features}, out / "model.pt")
+                "target": target, "features": features, "excerpt": excerpt}, out / "model.pt")
     joblib.dump(feat, out / "featurizer.joblib", compress=3)
     pd.DataFrame(history).to_csv(out / "history.csv", index=False)
     plot_history(history, out / "loss_curve.png")
 
     summary = {
-        "target": target, "features": features, "include_prefilled": include_prefilled,
+        "target": target, "features": features, "excerpt": excerpt,
+        "include_prefilled": include_prefilled,
         "labels": labels, "labels_dropped_no_train_rows": dropped,
         "train_config": cfg.to_dict(), "epochs_run": len(history),
         "best_epoch": int(np.argmin([h["val_loss"] for h in history]) + 1),

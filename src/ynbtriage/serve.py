@@ -37,10 +37,6 @@ from pydantic import BaseModel, Field, field_validator
 
 from .config import LOG_MAX_BYTES
 from .jobs import Busy, JobManager
-from .model.excerpt import ERROR_PATTERNS
-
-_ERR_RE = re.compile("|".join(ERROR_PATTERNS), re.IGNORECASE)
-
 # The loaded model lives here for the life of the process.
 STATE: dict = {"predictor": None, "info": None, "error": None}
 
@@ -82,6 +78,7 @@ def _model_info(d: Path, predictor) -> dict:
         "trained_at": datetime.fromtimestamp((d / "model.pt").stat().st_mtime, timezone.utc)
                               .isoformat(timespec="seconds"),
         "architecture": predictor.model.config,
+        "excerpt": predictor.excerpt,
     }
     mpath = d / "metrics.json"
     m = json.loads(mpath.read_text()) if mpath.exists() else {}
@@ -171,7 +168,6 @@ def predict(body: PredictIn):
         raise HTTPException(422, "log is empty")
     log, truncated = _tail_bytes(body.log, LOG_MAX_BYTES)
     result = p.predict(log)
-    result["error_line_found"] = any(_ERR_RE.search(ln) for ln in log.splitlines())
     result["input_truncated"] = truncated
     result["model"] = STATE["info"]["name"]
     return result

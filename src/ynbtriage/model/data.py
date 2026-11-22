@@ -15,7 +15,7 @@ from __future__ import annotations
 import pandas as pd
 
 from ..db import connect
-from .excerpt import error_excerpt
+from .excerpt import DEFAULT_EXCERPT, check_rule, log_excerpt
 
 _QUERY = """
 SELECT b.build_id, b.tool_name, b.log_tail,
@@ -46,7 +46,9 @@ def label_order(db_path=None, target: str = "class") -> list[str]:
 
 
 def load_dataset(db_path=None, target: str = "class", include_prefilled: bool = False,
-                 excerpt_kwargs: dict | None = None) -> pd.DataFrame:
+                 excerpt: str = DEFAULT_EXCERPT, excerpt_kwargs: dict | None = None) -> pd.DataFrame:
+    """Labelled rows with `text` = the log excerpt under rule `excerpt` (see excerpt.py)."""
+    check_rule(excerpt)
     if target not in ("class", "leaf"):
         raise ValueError("target must be 'class' or 'leaf'")
     conn = connect(db_path)
@@ -66,7 +68,7 @@ def load_dataset(db_path=None, target: str = "class", include_prefilled: bool = 
         parts.append(silver)
     out = pd.concat(parts, ignore_index=True)
 
-    out["text"] = out["log_tail"].map(lambda s: error_excerpt(s, **(excerpt_kwargs or {})))
+    out["text"] = out["log_tail"].map(lambda s: log_excerpt(s, excerpt, **(excerpt_kwargs or {})))
     out["silver"] = out["ann_status"] == "prefilled"
     return out[["build_id", "tool_name", "text", "label", "split", "silver"]]
 

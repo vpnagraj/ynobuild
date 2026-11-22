@@ -134,6 +134,8 @@ def train(
     target: str = typer.Option("class", help="class (3 coarse) | leaf (12 leaves)."),
     features: str = typer.Option("embed", help="embed | tfidf | both."),
     include_prefilled: bool = typer.Option(False, help="Add prefilled (silver) labels to TRAIN only."),
+    excerpt: str = typer.Option("tail", help="Log excerpt rule: tail (last 30 lines) | "
+                                "error_window (first error match + last 30 lines)."),
     hidden: str = typer.Option("64", help="Hidden layer sizes, comma-separated, e.g. 128,64."),
     activation: str = typer.Option("relu", help="relu | tanh | gelu | sigmoid."),
     dropout: float = 0.2,
@@ -160,7 +162,7 @@ def train(
                        f"val_acc {rec['val_acc']:.3f}")
 
     s = run(out, db_path=db, target=target, features=features,
-            include_prefilled=include_prefilled, cfg=cfg, on_epoch=show)
+            include_prefilled=include_prefilled, cfg=cfg, on_epoch=show, excerpt=excerpt)
 
     typer.echo(f"\n{s['n']}  epochs run {s['epochs_run']}, best epoch {s['best_epoch']}")
     typer.echo(f"leakage: {s['leakage']}")
@@ -202,11 +204,12 @@ def baselines(
     db: Path = typer.Option(None, "--db", help="DB path (default: YNB_DB_PATH)."),
     target: str = typer.Option("class", help="class | leaf (must match the run's target)."),
     seed: int = 7400,
+    excerpt: str = typer.Option(None, help="tail | error_window (default: the run's own rule)."),
 ):
     """Score only the shallow baselines and write baselines.json next to a run (no retraining)."""
     from .model.pipeline import run_baselines
 
-    r = run_baselines(out, db_path=db, target=target, seed=seed)
+    r = run_baselines(out, db_path=db, target=target, seed=seed, excerpt=excerpt)
     typer.echo(f"{r['n']}  data fingerprint {r['data_fingerprint']['hash']}")
 
     mpath = out / "metrics.json"
@@ -266,7 +269,8 @@ def shrink_model(
         source = "300 synthetic logs (pass --db to check on your real builds)"
 
     a = original.predict_many(logs)
-    b = Predictor(original.model, shrunk, original.labels, original.target).predict_many(logs)
+    b = Predictor(original.model, shrunk, original.labels, original.target,
+                  original.excerpt).predict_many(logs)
     flips = sum(x["label"] != y["label"] for x, y in zip(a, b))
     diff = max(abs(x["probabilities"][l] - y["probabilities"][l])
                for x, y in zip(a, b) for l in original.labels)

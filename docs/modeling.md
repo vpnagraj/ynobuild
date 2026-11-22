@@ -34,14 +34,16 @@ Note that the splits are stratified by class but not grouped by tool. Several bu
 
 ### Input representation
 
-Build logs are long and the cause of a failure is usually near the first error line or at the end. Each log is reduced to an excerpt before any model sees it (`excerpt.py`):
+Build logs are long, so each log is reduced to an excerpt before any model sees it (`excerpt.py`). There are two excerpt rules:
 
-1. Find the first line matching a list of error patterns (`error:`, `E: `, `fatal:`, `Killed`, `exec format error`, `curl: (N)` and others).
-2. Keep 5 lines before it and 15 after, plus the last 30 lines of the log.
-3. Replace values that differ between builds but carry no failure signal: long hex strings (`<HEX>`), timestamps (`<TS>`) and byte sizes (`<SIZE>`).
-4. Truncate to the last 4,000 characters.
+- **`tail`** (the default): the last 30 lines of the log. A failed build stops right after it fails, so the end of the log usually holds the real error.
+- **`error_window`** (the original rule): the first line matching a list of error patterns (`error:`, `E: `, `fatal:`, `Killed`, `exec format error`, `curl: (N)` and others), with 5 lines before it and 15 after, plus the last 30 lines.
 
-Every model, baselines included, uses the same excerpts.
+Both rules then replace values that differ between builds but carry no failure signal (long hex strings become `<HEX>`, timestamps `<TS>`, byte sizes `<SIZE>`) and keep the last 4,000 characters.
+
+Every model in a run, baselines included, uses the same excerpts. The rule is chosen at training time (`ynbtriage train --excerpt tail|error_window`) and recorded in the run's `model.pt` and `metrics.json`, and the model service predicts with the rule each model was trained with. Models saved before the rule was recorded used `error_window`, and are served with it. The Train screen in the app always uses the default.
+
+`tail` became the default because of the experiments in `experiments/`. A two-stream model with a learned gate relied mostly on the tail (`docs/experiments.md`), and the original MLP retrained on the last 30 lines alone did as well as it did on the `error_window` excerpt (`experiments/02_tail_only.ipynb`). Longer tails (50 or 80 lines) did slightly worse. The experiments themselves use `error_window`, which was the rule when they were run.
 
 The MLP needs a fixed-length numeric vector. The final model uses TF-IDF features (`features: tfidf`, implemented in `features.py`):
 

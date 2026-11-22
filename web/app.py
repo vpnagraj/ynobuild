@@ -22,7 +22,8 @@ st.set_page_config(page_title="ynobuild", page_icon=":material/build_circle:", l
 
 DEFAULT_ANNOTATOR = os.environ.get("YNB_ANNOTATOR", "unknown")
 
-# Patterns used to locate the first "failing region" in a log tail.
+# Patterns used to highlight the first "failing region" when a person reads a log.
+# Mirrors ERROR_PATTERNS in src/ynbtriage/model/excerpt.py; change both together.
 ERROR_PATTERNS = [
     r"error:", r"\bE:\s", r"fatal error", r"fatal:", r"\bKilled\b", r"No space left",
     r"not found", r"parse error", r"unknown instruction", r"Traceback",
@@ -429,9 +430,6 @@ elif screen == "Predict":
 
         if top_p < 0.6:
             st.warning("Low confidence: the model is unsure between classes. Read the log.")
-        if not res.get("error_line_found"):
-            st.info("No recognizable error line in this log, so the prediction rests on the "
-                    "last lines only and may be unreliable.")
         if res.get("input_truncated"):
             st.caption("The log was long; only its tail was used.")
 

@@ -11,27 +11,33 @@ from pathlib import Path
 
 import torch
 
-from .excerpt import error_excerpt
+from .excerpt import LEGACY_EXCERPT, check_rule, log_excerpt
 from .mlp import MLP
 
 
 class Predictor:
-    def __init__(self, model: MLP, featurizer, labels: list[str], target: str):
+    def __init__(self, model: MLP, featurizer, labels: list[str], target: str,
+                 excerpt: str = LEGACY_EXCERPT):
         self.model, self.featurizer, self.labels, self.target = model, featurizer, labels, target
+        self.excerpt = excerpt
 
     @classmethod
     def load(cls, model_dir):
         import joblib
         d = Path(model_dir)
         ckpt = torch.load(d / "model.pt", map_location="cpu", weights_only=False)
+        # Predict with the excerpt rule the model was trained with. Models saved before
+        # the rule was recorded used the original error-window rule.
+        excerpt = check_rule(ckpt.get("excerpt", LEGACY_EXCERPT))
         c = ckpt["config"]
         model = MLP(c["in_dim"], c["n_classes"], tuple(c["hidden"]), c["activation"], c["dropout"])
         model.load_state_dict(ckpt["state_dict"])
         model.eval()
-        return cls(model, joblib.load(d / "featurizer.joblib"), ckpt["labels"], ckpt["target"])
+        return cls(model, joblib.load(d / "featurizer.joblib"), ckpt["labels"], ckpt["target"],
+                   excerpt)
 
     def predict_many(self, logs: list[str]) -> list[dict]:
-        excerpts = [error_excerpt(l) for l in logs]
+        excerpts = [log_excerpt(l, self.excerpt) for l in logs]
         X = torch.tensor(self.featurizer.transform(excerpts))
         proba = self.model.predict_proba(X).numpy()
         out = []

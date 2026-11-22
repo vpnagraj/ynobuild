@@ -82,7 +82,7 @@ def load_two_stream(db_path=None, target: str = "class") -> tuple[pd.DataFrame, 
     `text` is the original merged excerpt (for the baselines); `err_text` and
     `tail_text` are the split regions for the two-stream model.
     """
-    df = load_dataset(db_path, target=target)
+    df = load_dataset(db_path, target=target, excerpt="error_window")   # the original excerpt rule
     conn = connect(db_path)
     try:
         logs = pd.read_sql_query("SELECT build_id, log_tail FROM builds", conn)

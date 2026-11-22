@@ -1,6 +1,7 @@
 {
   "target": "class",
   "features": "tfidf",
+  "excerpt": "tail",
   "include_prefilled": false,
   "labels": [
     "environment_decay",
@@ -112,55 +113,55 @@
     "naive_bayes": {
       "val": {
         "n": 156,
-        "accuracy": 0.8076923076923077,
-        "macro_f1": 0.8113936045868572,
+        "accuracy": 0.8205128205128205,
+        "macro_f1": 0.8247692068837854,
         "per_class_f1": {
-          "environment_decay": 0.7818181818181819,
-          "recipe_error": 0.8817204301075269,
-          "build_execution": 0.7706422018348624
+          "environment_decay": 0.7787610619469026,
+          "recipe_error": 0.9263157894736842,
+          "build_execution": 0.7692307692307693
         },
         "confusion": [
           [
-            43,
+            44,
             2,
-            11
+            10
           ],
           [
-            3,
-            41,
-            4
+            2,
+            44,
+            2
           ],
           [
-            8,
-            2,
-            42
+            11,
+            1,
+            40
           ]
         ]
       },
       "test": {
         "n": 156,
-        "accuracy": 0.8910256410256411,
-        "macro_f1": 0.891726921376517,
+        "accuracy": 0.9038461538461539,
+        "macro_f1": 0.9046618647458984,
         "per_class_f1": {
-          "environment_decay": 0.8888888888888888,
-          "recipe_error": 0.9183673469387755,
-          "build_execution": 0.8679245283018868
+          "environment_decay": 0.8928571428571429,
+          "recipe_error": 0.9387755102040817,
+          "build_execution": 0.8823529411764706
         },
         "confusion": [
           [
-            48,
+            50,
             2,
-            6
+            4
           ],
           [
             1,
-            45,
-            2
+            46,
+            1
           ],
           [
-            3,
-            3,
-            46
+            5,
+            2,
+            45
           ]
         ]
       }
@@ -168,55 +169,55 @@
     "tfidf_logreg": {
       "val": {
         "n": 156,
-        "accuracy": 0.8653846153846154,
-        "macro_f1": 0.87000874433196,
+        "accuracy": 0.8846153846153846,
+        "macro_f1": 0.8884091552370125,
         "per_class_f1": {
-          "environment_decay": 0.8347826086956521,
-          "recipe_error": 0.945054945054945,
-          "build_execution": 0.8301886792452831
+          "environment_decay": 0.8596491228070176,
+          "recipe_error": 0.9565217391304348,
+          "build_execution": 0.8490566037735849
         },
         "confusion": [
           [
-            48,
+            49,
             0,
-            8
+            7
           ],
           [
-            3,
-            43,
+            2,
+            44,
             2
           ],
           [
-            8,
+            7,
             0,
-            44
+            45
           ]
         ]
       },
       "test": {
         "n": 156,
-        "accuracy": 0.9166666666666666,
-        "macro_f1": 0.9181435130242984,
+        "accuracy": 0.9294871794871795,
+        "macro_f1": 0.9301156116096694,
         "per_class_f1": {
-          "environment_decay": 0.9043478260869565,
+          "environment_decay": 0.9298245614035088,
           "recipe_error": 0.946236559139785,
-          "build_execution": 0.9038461538461539
+          "build_execution": 0.9142857142857143
         },
         "confusion": [
           [
-            52,
+            53,
             0,
-            4
+            3
+          ],
+          [
+            2,
+            44,
+            2
           ],
           [
             3,
-            44,
-            1
-          ],
-          [
-            4,
             1,
-            47
+            48
           ]
         ]
       }
@@ -252,38 +253,38 @@
     },
     "val": {
       "n": 156,
-      "accuracy": 0.8461538461538461,
-      "macro_f1": 0.8517999242137173,
+      "accuracy": 0.8717948717948718,
+      "macro_f1": 0.8762718938445375,
       "per_class_f1": {
-        "environment_decay": 0.8103448275862069,
-        "recipe_error": 0.945054945054945,
-        "build_execution": 0.8
+        "environment_decay": 0.8421052631578947,
+        "recipe_error": 0.9565217391304348,
+        "build_execution": 0.8301886792452831
       },
       "confusion": [
         [
-          47,
+          48,
           0,
-          9
+          8
         ],
         [
-          3,
-          43,
+          2,
+          44,
           2
         ],
         [
-          10,
+          8,
           0,
-          42
+          44
         ]
       ]
     },
     "test": {
       "n": 156,
-      "accuracy": 0.9230769230769231,
-      "macro_f1": 0.9240836395997203,
+      "accuracy": 0.9294871794871795,
+      "macro_f1": 0.9305595381468524,
       "per_class_f1": {
-        "environment_decay": 0.9203539823008849,
-        "recipe_error": 0.946236559139785,
+        "environment_decay": 0.9285714285714286,
+        "recipe_error": 0.9574468085106383,
         "build_execution": 0.9056603773584906
       },
       "confusion": [
@@ -293,8 +294,8 @@
           4
         ],
         [
-          2,
-          44,
+          1,
+          45,
           2
         ],
         [

@@ -2,7 +2,8 @@
 
 Pipeline (each step is its own module so it can be read on its own):
 
-    excerpt.py   log_tail -> error-relevant excerpt (same text for every model)
+    excerpt.py   log_tail -> excerpt: last 30 lines (default) or the original
+                 error-window rule (same text for every model in a run)
     data.py      DB -> DataFrame of (build_id, tool_name, text, label, split)
     features.py  text -> fixed-length vector (TF-IDF+SVD, sentence embedding, or both)
     mlp.py       the neural network (feed-forward MLP, >=1 hidden layer)
